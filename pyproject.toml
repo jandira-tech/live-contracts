@@ -1,7 +1,10 @@
 [project]
 name = "sec-listener"
 version = "0.1.0"
-description = "Add your description here"
+description = "Continuous RSS listener for SEC filings with EX-10 exhibit extraction"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "aiohttp",
+    "datamule",
+]
