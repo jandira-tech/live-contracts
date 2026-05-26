@@ -1,11 +1,12 @@
 /* =========================================================================
-   SEC ContractsLive — design tokens + foundation
+   SEC Live Contracts — design tokens + foundation
    Refined minimal · editorial-technical · signage-adjacent (light theme).
    Tokens are the single source of truth; the yellow accent is STRUCTURAL,
    never textual. Sharp corners only (--radius: 0).
    ========================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Manrope + JetBrains Mono are loaded via <link rel="preconnect"> + stylesheet
+   in Base.astro (avoids the render-blocking @import waterfall). */
 
 /* Departure Mono — self-hosted from /public/fonts. */
 @font-face {
@@ -142,6 +143,10 @@ a:hover { text-decoration: underline; text-decoration-color: var(--accent); text
 .prose { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem 1.75rem; }
 .prose :is(h1,h2,h3) { letter-spacing: -0.01em; color: var(--text); }
 .prose p, .prose li { color: var(--text); }
+/* Links inside rendered markdown must be distinguishable from body text (WCAG 1.4.1),
+   since the global `a` rule strips underlines. */
+.prose a { text-decoration: underline; text-decoration-color: var(--text-secondary); text-underline-offset: 3px; }
+.prose a:hover { text-decoration-color: var(--text); }
 .prose table { border-collapse: collapse; width: 100%; }
 .prose td, .prose th { border: 1px solid var(--border); padding: 0.4rem 0.6rem; }
 
@@ -164,14 +169,16 @@ footer.site { border-top: 1px solid var(--border); color: var(--text-secondary);
   display: flex; justify-content: space-between; align-items: baseline;
   padding: 1rem 0 0.4rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
 }
-.sl-section-bar .title { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); }
+.sl-section-bar .title { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); display: inline-flex; align-items: center; gap: 0.4rem; }
+/* Vertical accent bar via pseudo-element (was a raw ▎ glyph — inconsistent across UAs / screen readers). */
+.sl-section-bar .title::before { content: ''; display: inline-block; width: 3px; height: 0.85em; background: currentColor; }
 .sl-section-bar .meta { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-secondary); }
 
 /* ---------- Live feed — hairline-separated rows ---------- */
 .sl-feed { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .sl-row {
   display: grid; grid-template-columns: 180px 1fr; gap: 2rem;
-  padding: 1.5rem 0 1.5rem 0.9rem; border-bottom: 1px solid var(--border);
+  padding: 1.5rem 0.9rem; border-bottom: 1px solid var(--border);
   position: relative; color: inherit; transition: background var(--t-fast);
 }
 .sl-row:last-child { border-bottom: 0; }
@@ -200,6 +207,8 @@ footer.site { border-top: 1px solid var(--border); color: var(--text-secondary);
 .sl-search-row { display: flex; gap: 0; border: 1px solid var(--text); margin-top: 1.5rem; }
 .sl-search-row input { flex: 1; font-family: var(--font-body); font-size: 1.25rem; padding: 1.1rem 1.4rem; background: var(--bg); border: 0; color: var(--text); letter-spacing: -0.01em; }
 .sl-search-row input:focus { outline: none; }
+/* Keyboard focus must stay visible (WCAG 2.4.7); ring the whole row on focus-within. */
+.sl-search-row:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sl-search-row input::placeholder { color: var(--text-secondary); }
 .sl-search-row button { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; padding: 0 1.75rem; border: 0; background: var(--text); color: var(--bg); cursor: pointer; }
 .sl-search-row button:hover { color: var(--accent); }

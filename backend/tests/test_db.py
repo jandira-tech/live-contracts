@@ -143,3 +143,16 @@ def test_since_returns_only_recent_rows(db):
     assert recent[0]["accession"] == "0001-26-000003"
     # A wide window picks up both.
     assert len(db.ex10_since(seconds=7200)) == 2
+
+
+def test_empty_filing_metadata_persists_not_null(db):
+    """An empty {} (a processed-but-headerless filing) must persist as '{}', not NULL,
+    so the backfill worker does not re-select it as missing forever."""
+    db.save_ex10_exhibit(
+        {"accession": "em-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "e.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="body", filing_metadata={},
+    )
+    rows = db.recent_ex10()
+    assert rows[0]["filing_metadata"] == "{}"
+    assert db.exhibits_missing_filing_metadata(limit=10) == []

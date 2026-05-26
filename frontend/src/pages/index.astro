@@ -37,7 +37,7 @@ const stats = await ex10Stats();
   </div>
 
   <div class="sl-section-bar">
-    <span class="title">▎New agreements</span>
+    <span class="title">New agreements</span>
     <span class="meta">last {WINDOW}s · {items.length} shown</span>
   </div>
 
@@ -54,13 +54,15 @@ const stats = await ex10Stats();
   <a class="sl-tail-link" href="/agreements/1">Browse all agreements →</a>
 
   <script>
-    // Tick the hero countdown down to the next meta-refresh.
+    // Tick the hero countdown to the next meta-refresh. Compute against a fixed
+    // target so the display stays accurate even if the tab is backgrounded and
+    // setInterval is throttled (a plain decrement would drift).
     const el = document.getElementById('cd');
     if (el) {
-      let n = Number(el.dataset.window) || 60;
+      const target = Date.now() + (Number(el.dataset.window) || 60) * 1000;
       setInterval(() => {
-        n = n > 0 ? n - 1 : 0;
-        el.textContent = String(n).padStart(2, '0');
+        const remaining = Math.max(0, Math.ceil((target - Date.now()) / 1000));
+        el.textContent = String(remaining).padStart(2, '0');
       }, 1000);
     }
   </script>
