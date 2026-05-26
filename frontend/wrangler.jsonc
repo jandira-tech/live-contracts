@@ -1,6 +1,6 @@
 {
   // Cloudflare Workers deploy config for the Astro 6 frontend.
-  // Build first (`pnpm build`), then `wrangler deploy` from this directory.
+  // Build first (`bun run build`), then `wrangler deploy` from this directory.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sec-ex10-frontend",
   "main": "@astrojs/cloudflare/entrypoints/server",
