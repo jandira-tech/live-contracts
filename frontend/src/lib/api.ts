@@ -8,6 +8,18 @@
  */
 import { SEC_API_URL, SEC_API_KEY } from 'astro:env/server';
 
+export interface FilingHeader {
+  company_name?: string;
+  cik?: string;
+  sic?: string;
+  state_of_incorporation?: string;
+  period?: string;
+  filing_date?: string;
+  file_number?: string;
+  location?: string;
+  items?: string[];
+}
+
 export interface Ex10Summary {
   id: number;
   accession: string;
@@ -21,11 +33,17 @@ export interface Ex10Summary {
   markdown_status: string;
   excerpt: string;
   has_markdown: boolean;
+  // Compact filing-header fields for card footers.
+  company_name?: string;
+  period?: string;
+  location?: string;
+  items?: string[];
 }
 
 export interface Ex10Detail extends Ex10Summary {
   markdown: string;
   sequence: string;
+  filing?: FilingHeader;
 }
 
 export interface PageResult {
@@ -44,7 +62,12 @@ function headers(): Record<string, string> {
 
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
-    const res = await fetch(`${SEC_API_URL}${path}`, { headers: headers() });
+    // Bounded timeout so a slow/cold backend can't hang the Worker request;
+    // we degrade to the fallback and let the next request (or refresh) retry.
+    const res = await fetch(`${SEC_API_URL}${path}`, {
+      headers: headers(),
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) return fallback;
     return (await res.json()) as T;
   } catch {
@@ -77,6 +100,22 @@ export interface Stats {
   last_24h: number;
   by_doc_type: Record<string, number>;
   by_form_type: Record<string, number>;
+}
+
+export interface SearchResult extends PageResult {
+  query: string;
+}
+
+export function ex10Search(query: string, page = 1, pageSize = 20): Promise<SearchResult> {
+  const q = encodeURIComponent(query);
+  return getJson<SearchResult>(`/api/search?q=${q}&page=${page}&page_size=${pageSize}`, {
+    query,
+    items: [],
+    total: 0,
+    page,
+    page_size: pageSize,
+    total_pages: 0,
+  });
 }
 
 export function ex10Stats(): Promise<Stats> {

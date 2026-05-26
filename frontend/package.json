@@ -14,13 +14,7 @@
   "dependencies": {
     "@astrojs/cloudflare": "^13.5.4",
     "astro": "^6.3.7",
-    "astro-pagefind": "^2.0.0",
     "marked": "^16.0.0"
   },
-  "devDependencies": {
-    "pagefind": "^1.5.2"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64"]
-  }
+  "trustedDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64"]
 }

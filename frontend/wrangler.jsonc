@@ -1,6 +1,6 @@
 {
   // Cloudflare Workers deploy config for the Astro 6 frontend.
-  // Build first (`pnpm build`), then `wrangler deploy` from this directory.
+  // Build first (`bun run build`), then `wrangler deploy` from this directory.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sec-ex10-frontend",
   "main": "@astrojs/cloudflare/entrypoints/server",
@@ -16,11 +16,17 @@
   "kv_namespaces": [
     { "binding": "SESSION", "id": "f3559549c63e48cf8af7500331ceb1cf" }
   ],
-  // Non-secret config. SEC_API_URL must point at the PRIVATE FastAPI origin
-  // reached over a Cloudflare Tunnel — replace before relying on the live feed.
+  // The backend API runs as a Hugging Face Space (key-gated). The Worker fetches
+  // it at request time and caches at the edge (CDN + stale-while-revalidate).
   // SEC_API_KEY is a secret: `wrangler secret put SEC_API_KEY`.
   "vars": {
-    "SEC_API_URL": "https://sec-api.internal.example.com"
+    "SEC_API_URL": "https://arthrod-sec-ex10-api.hf.space"
   },
+  // Public custom domain (the arthur.law zone is already on this Cloudflare
+  // account). `wrangler deploy` provisions the hostname + edge cert; no manual
+  // DNS record needed for a Workers custom domain.
+  "routes": [
+    { "pattern": "contracts-live.arthur.law", "custom_domain": true }
+  ],
   "observability": { "enabled": true }
 }

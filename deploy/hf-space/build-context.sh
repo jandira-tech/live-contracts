@@ -11,7 +11,10 @@ cp -r backend/sec_listener "$DEST/sec_listener"
 find "$DEST/sec_listener" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 
 # Lean, consistent seed: ex10_exhibits (+markdown) + seen_accessions, VACUUMed.
-python - <<'PY'
+# Skip gracefully on clean checkouts / CI where the live DB doesn't exist
+# (otherwise sqlite would silently create an empty DB and the SELECT would fail).
+if [ -f "ex10_listener.db" ]; then
+  ${PYTHON:-python3} - <<'PY'
 import sqlite3
 src = sqlite3.connect("ex10_listener.db")
 dst = sqlite3.connect("deploy/hf-space/seed.db")
@@ -22,4 +25,7 @@ dst.commit(); dst.execute("VACUUM")
 print("seed ex10_exhibits:", dst.execute("SELECT COUNT(*) FROM ex10_exhibits").fetchone()[0])
 dst.close()
 PY
-echo "staged $DEST (sec_listener/ + seed.db)"
+  echo "staged $DEST (sec_listener/ + seed.db)"
+else
+  echo "WARNING: ex10_listener.db not found — skipping seed regeneration (keeping existing seed.db if any)" >&2
+fi
