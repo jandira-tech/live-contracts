@@ -115,3 +115,12 @@ def test_extract_filing_header_tolerates_non_dict_content():
     assert extract_filing_header([1, 2])["company_name"] == ""
     assert extract_filing_header("garbage")["items"] == []
     assert extract_filing_header(42)["period"] == ""
+
+
+def test_extract_filing_header_captures_acceptance_datetime():
+    """The real filing time (SEC acceptance-datetime, ET) is surfaced as filed_at."""
+    from sec_listener.parsing import extract_filing_header
+    out = extract_filing_header({"acceptance-datetime": "20260526113637", "filing-date": "20260526"})
+    assert out["filed_at"] == "20260526113637"
+    # absent -> empty, never raises
+    assert extract_filing_header({})["filed_at"] == ""

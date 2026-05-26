@@ -46,11 +46,16 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
         response: Response,
         page: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=200),
+        form: str | None = Query(None, max_length=40),
+        cik: str | None = Query(None, max_length=20),
+        filer: str | None = Query(None, max_length=120),
+        sort: str = Query("newest"),
     ):
-        total = db.count_ex10()
+        oldest = sort == "oldest"
+        total = db.count_ex10(form=form, cik=cik, filer=filer)
         total_pages = max(1, math.ceil(total / page_size)) if total else 0
         offset = (page - 1) * page_size
-        items = db.recent_ex10(limit=page_size, offset=offset)
+        items = db.recent_ex10(limit=page_size, offset=offset, form=form, cik=cik, filer=filer, oldest=oldest)
         response.headers["Cache-Control"] = _LIST_CACHE
         return {
             "items": [_summary(i) for i in items],
@@ -59,6 +64,11 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
             "page_size": page_size,
             "total_pages": total_pages,
         }
+
+    @app.get("/api/facets", dependencies=[Depends(require_key)])
+    def facets(response: Response):
+        response.headers["Cache-Control"] = _LIST_CACHE
+        return {"forms": db.form_facets()}
 
     @app.get("/api/ex10/since", dependencies=[Depends(require_key)])
     def ex10_since(
@@ -109,32 +119,46 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
         response.headers["Cache-Control"] = _DETAIL_CACHE
         out = dict(row)
         out["filing"] = _parse_filing(out.get("filing_metadata"))
+        out["image_urls"] = _parse_image_urls(out.get("image_urls"))
         return out
 
     return app
 
 
 _MD_MARKERS = re.compile(r"\*+|_{2,}|`+|#+|>+|\[|\]|!\[")
+# Image references markitdown emits for scanned exhibits, e.g.
+# `(ex10-3_001.jpg)` or `(exhibit101facilityagreem001.jpg "slide1")`.
+_IMG_REF = re.compile(r"\([^()]*\.(?:jpe?g|png|gif|tiff?|svg|webp)(?:\s+\"[^\"]*\")?[^()]*\)", re.I)
+# Leading exhibit label(s) — pure metadata at the START ("Exhibit 10.1", "EX-10.3").
+# Anchored so mid-body references ("...subject to Exhibit 10.2...") are preserved.
+_LEADING_LABEL = re.compile(r"^\s*(?:(?:exhibit|ex)[\s.\-]*\d+(?:\.\d+)?\b\s*)+", re.I)
 
 
 def clean_excerpt(text: str | None, limit: int = 280) -> str:
-    """Turn raw markdown into a clean one-line preview.
+    """Turn raw exhibit markdown into a clean preview.
 
-    Strips emphasis/heading/table markers and pipes, collapses whitespace, and
-    truncates on a word boundary with an ellipsis. Keeps card previews readable
-    instead of showing ``| | | --- |`` table noise.
+    Drops scanned-image references and "Exhibit 10.x" labels (metadata, not
+    contract text), strips markdown/table markers, and collapses whitespace
+    while **preserving single line breaks** (blank-line runs become one break)
+    so previews read as text instead of a grumbled run-on. Truncates on a word
+    or line boundary with an ellipsis.
     """
     if not text:
         return ""
     s = text.replace("|", " ")
+    s = _IMG_REF.sub(" ", s)                   # image refs are noise anywhere
     s = _MD_MARKERS.sub("", s)
     s = re.sub(r"-{2,}", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"[ \t]+", " ", s)              # collapse horizontal whitespace
+    s = re.sub(r"[ \t]*\n[ \t]*", "\n", s)     # trim around newlines
+    s = re.sub(r"\n{2,}", "\n", s).strip()     # blank-line runs -> single break
+    s = _LEADING_LABEL.sub("", s).strip()      # strip only LEADING exhibit label(s)
     if len(s) <= limit:
         return s
     cut = s[:limit]
-    if " " in cut:
-        cut = cut[: cut.rfind(" ")]
+    boundary = max(cut.rfind(" "), cut.rfind("\n"))
+    if boundary > 0:
+        cut = cut[:boundary]
     return cut.rstrip() + "…"
 
 
@@ -147,6 +171,16 @@ def _parse_filing(raw: str | None) -> dict:
         return {}
     # Valid JSON that isn't an object (list/str/number) would break downstream .get().
     return val if isinstance(val, dict) else {}
+
+
+def _parse_image_urls(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        val = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return [str(u) for u in val] if isinstance(val, list) else []
 
 
 def _summary(row: dict) -> dict:
@@ -164,13 +198,17 @@ def _summary(row: dict) -> dict:
         "filing_url": row.get("filing_url"),
         "found_at": row.get("found_at"),
         "markdown_status": row.get("markdown_status"),
-        "excerpt": clean_excerpt(md, 280),
+        "excerpt": clean_excerpt(md, 520),  # enough to fill ~4 lines; CSS clamps
         "has_markdown": bool(md),
         # Compact filing header for card footers (company, period of report, items).
         "company_name": filing.get("company_name", ""),
         "period": filing.get("period", ""),
         "location": filing.get("location", ""),
         "items": filing.get("items", []),
+        # Actual SEC acceptance time (ET, "YYYYMMDDHHMMSS"); "" until backfilled.
+        "filed_at": filing.get("filed_at", ""),
+        # Public HF-dataset URLs for scanned (image-only) exhibits; [] otherwise.
+        "image_urls": _parse_image_urls(row.get("image_urls")),
     }
 
 
