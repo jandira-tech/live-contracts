@@ -1,41 +1,57 @@
 # Autonomous Build Progress
 
-Started: 2026-05-26. Loop budget: ~10 hours. Mode: autonomous (no user review).
-Method: TDD red-green, stacked PRs (each branch over the previous). Test always.
+Started 2026-05-26. Loop budget ~10h. Mode: autonomous (no user review).
+Method: TDD red-green, stacked PRs. Test always.
 
-## Architecture (target)
+## STATUS: core build COMPLETE — now in maintenance/polish loop
 
-- **Backend (Python, in-repo)**: hardened SEC RSS listener + EX-10 extraction, SQLite (`ex10_listener.db`).
-  Adds `markdown` column (HTML→MD via `markitdown`, a solid dependency).
-- **FastAPI API**: read-only, internal only (bound to localhost / API-key gated). NOT open to the world.
-- **Worker**: background worker process driving continuous parsing + markdown backfill.
-- **Frontend (Astro 6, hybrid SSR)**: Live Content Collections fetch from API at request time,
-  refresh every 60s ("new agreements in the last 60 seconds"), native pagination, Pagefind search.
-- **Edge**: Cloudflare Worker (Astro adapter) + CDN caching + stale-while-revalidate.
-- **Deploy**: wrangler (authenticated, account 5651b2fe85f9bbb0fc1b8f4ad2cb4e64).
+All 10 requirements delivered. Stacked PRs open #2→#6. Backend live & supervised.
+Frontend deployed: https://sec-ex10-frontend.cicero-im.workers.dev
 
-## Stacked PR plan
+## Stacked PRs (all open, not yet merged)
 
-- [ ] **PR1** `feat/backend-hardening-markdown` (off master): refactor listener into testable package,
-      robustness (retries/backoff, structured logging, graceful errors, config via env),
-      add `markdown` column + markitdown converter, backfill. TDD.
-- [ ] **PR2** `feat/fastapi-internal-api` (off PR1): read-only FastAPI — recent agreements, pagination,
-      `/since?seconds=60`, API-key gated, localhost bind. TDD.
-- [ ] **PR3** `feat/worker-continuous` (off PR2): background worker orchestrating listener + conversion;
-      systemd/supervisor-style runner; not network-exposed. TDD.
-- [ ] **PR4** `feat/astro-frontend` (off PR3): Astro 6 hybrid SSR, live collections loader, 60s refresh,
-      pagination, Pagefind, Cloudflare adapter, SWR cache headers.
-- [ ] **PR5** `feat/deploy-wrangler` (off PR4): wrangler config + deploy.
+- [x] **PR #2** `feat/backend-hardening-markdown` — package + robustness + markdown column (24 tests)
+- [x] **PR #3** `feat/fastapi-internal-api` — read-only API, key-gated, localhost (30 tests)
+- [x] **PR #4** `feat/worker-continuous` — listener+backfill worker, supervised (33 tests)
+- [x] **PR #5** `feat/astro-frontend` — Astro 6 hybrid SSR, live collections, pagination, Pagefind
+- [x] **PR #6** `feat/deploy-wrangler` — wrangler config + live deploy + DEPLOYMENT.md
 
-## Current state
+(GitHub PR numbers are #2–#6; branch stack base is master.)
 
-- Iteration: 0 (setup)
-- Active branch: (creating PR1)
-- Next action: PR1 — scaffold backend package + first failing test for markdown converter.
+## Live runtime state
 
-## Notes / decisions
+- Worker (listener + markdown backfill): running detached, pid in `sec-listener.pid`,
+  also supervised hourly by `watchdog.sh` (cron). Survives SEC 503s.
+- Internal API: `python -m sec_listener.api` on 127.0.0.1:8799 (pid /tmp/sec_api.pid).
+  NOT supervised by watchdog yet — see polish backlog.
+- DB `ex10_listener.db`: 737 EX-10 exhibits, **0 pending markdown** (backfill done).
 
-- Markdown dependency: `markitdown` (Microsoft) — handles HTML/PDF/txt, well maintained.
-- DB stays at repo root `ex10_listener.db` (production listener + watchdog depend on it).
-- Keep `sec-listener.py` working or update `watchdog.sh` to new entrypoint.
-- FastAPI origin must not be public; Worker reaches it via shared secret / tunnel; document for user.
+## Requirement checklist
+
+1. [x] Robustness + continuous parsing (retry/backoff, per-filing isolation, signals)
+2. [x] Markdown column via markitdown + backfill (737/737 converted)
+3. [x] Worker, not network-exposed
+4. [x] Astro frontend, 60s refresh, "new agreements in last 60s"
+5. [x] Astro 6 hybrid SSR + CF Workers + FastAPI + CDN + stale-while-revalidate
+6. [x] Astro Live Content Collections
+7. [x] Native pagination (paginate())
+8. [x] Pagefind search
+9. [x] Deployed via wrangler (authenticated)
+10. [x] Autonomous
+
+## Polish backlog (loop iterations)
+
+- [ ] Supervise the internal API (+ optional cloudflared tunnel) in watchdog.sh.
+- [ ] Scheduled rebuild+redeploy of the frontend snapshot (~hourly) to keep the
+      public static archive fresh as new agreements arrive.
+- [ ] Clean markdown excerpts (strip leading table-pipe artifacts seen on cards).
+- [ ] Cap/paginate prerendered detail pages as the dataset grows (build time).
+- [ ] Stats endpoint (/api/stats), JSON feed.
+
+## Loop behaviour on re-entry
+
+Build is DONE — do NOT rebuild from scratch. Read this file, then:
+1. Health-check worker + API (restart if down).
+2. Confirm backfill pending stays low.
+3. Pick one polish-backlog item, do it TDD + small commit/PR.
+4. Refresh deployed snapshot at most ~once/hour.
