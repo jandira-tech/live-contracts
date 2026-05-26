@@ -116,6 +116,16 @@ async def _run_all(config: Config):
         asyncio.create_task(worker.run(rps=config.requests_per_second), name="backfill"),
     ]
 
+    # Optionally serve the internal API in-process, so one supervised process
+    # covers listening, backfill, and the API. Still localhost/key-gated.
+    api_server = None
+    if config.serve_api:
+        from .api import make_api_server
+
+        api_server = make_api_server(config, db)
+        tasks.append(asyncio.create_task(api_server.serve(), name="api"))
+        logger.info("Serving internal API on %s:%d", config.api_host, config.api_port)
+
     stop = asyncio.Event()
 
     def _stop():
@@ -133,9 +143,12 @@ async def _run_all(config: Config):
         # Run until a signal arrives.
         await stop.wait()
     # When the listener finishes (duration reached) or a signal arrives, wind down.
+    if api_server is not None:
+        api_server.should_exit = True
     await asyncio.gather(tasks[0], return_exceptions=True)
-    tasks[1].cancel()
-    await asyncio.gather(tasks[1], return_exceptions=True)
+    for task in tasks[1:]:
+        task.cancel()
+    await asyncio.gather(*tasks[1:], return_exceptions=True)
 
 
 def main():

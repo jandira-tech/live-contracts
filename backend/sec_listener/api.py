@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 
@@ -105,18 +104,35 @@ def _summary(row: dict) -> dict:
     }
 
 
-def main():
+def make_api_server(config: Config, db: Database):
+    """Build a uvicorn.Server for the internal API, bound per Config.
+
+    Returned (not started) so it can be awaited as a task alongside the worker's
+    other loops, or run standalone.
+    """
     import uvicorn
 
+    app = create_app(db, api_key=config.api_key)
+    uconfig = uvicorn.Config(
+        app,
+        host=config.api_host,  # localhost by default — not public
+        port=config.api_port,
+        log_level="warning",
+    )
+    return uvicorn.Server(uconfig)
+
+
+def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     config = Config.from_env()
     db = Database(config.db_path)
     db.init()
-    app = create_app(db, api_key=os.environ.get("SEC_API_KEY"))
-    host = os.environ.get("SEC_API_HOST", "127.0.0.1")  # localhost by default — not public
-    port = int(os.environ.get("SEC_API_PORT", "8799"))
-    logger.info("Internal API listening on %s:%d (key=%s)", host, port, "set" if os.environ.get("SEC_API_KEY") else "OPEN")
-    uvicorn.run(app, host=host, port=port)
+    server = make_api_server(config, db)
+    logger.info(
+        "Internal API listening on %s:%d (key=%s)",
+        config.api_host, config.api_port, "set" if config.api_key else "OPEN",
+    )
+    server.run()
 
 
 if __name__ == "__main__":
