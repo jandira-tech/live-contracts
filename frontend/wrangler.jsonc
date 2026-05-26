@@ -1,0 +1,26 @@
+{
+  // Cloudflare Workers deploy config for the Astro 6 frontend.
+  // Build first (`pnpm build`), then `wrangler deploy` from this directory.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sec-ex10-frontend",
+  "main": "@astrojs/cloudflare/entrypoints/server",
+  "compatibility_date": "2026-04-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./dist/client",
+    // Internal links omit trailing slashes; serve those directly (no 307 hop).
+    "html_handling": "drop-trailing-slash"
+  },
+  // Sessions KV (created via `wrangler kv namespace create SESSION`).
+  "kv_namespaces": [
+    { "binding": "SESSION", "id": "f3559549c63e48cf8af7500331ceb1cf" }
+  ],
+  // Non-secret config. SEC_API_URL must point at the PRIVATE FastAPI origin
+  // reached over a Cloudflare Tunnel — replace before relying on the live feed.
+  // SEC_API_KEY is a secret: `wrangler secret put SEC_API_KEY`.
+  "vars": {
+    "SEC_API_URL": "https://sec-api.internal.example.com"
+  },
+  "observability": { "enabled": true }
+}
