@@ -39,6 +39,7 @@ export interface Ex10Summary {
   location?: string;
   items?: string[];
   filed_at?: string; // SEC acceptance datetime "YYYYMMDDHHMMSS" (ET); "" until backfilled
+  image_urls?: string[]; // HF-dataset URLs for scanned (image-only) exhibits; [] otherwise
 }
 
 export interface Ex10Detail extends Ex10Summary {

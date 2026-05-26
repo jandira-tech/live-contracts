@@ -214,3 +214,25 @@ def test_insert_exhibits_bulk_maps_empty_to_null(db):
     ])
     assert [r["accession"] for r in db.exhibits_missing_markdown(limit=10)] == ["r1"]  # "" -> NULL -> pending
     assert db.recent_ex10()[0]["filing_metadata"] is None
+def test_image_urls_column_update_and_pending(db):
+    import json
+    db.save_ex10_exhibit(
+        {"accession": "img-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "i.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="(ex10-1_001.jpg) (ex10-1_002.jpg)",  # image-only body, status done
+    )
+    db.save_ex10_exhibit(
+        {"accession": "txt-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.2",
+         "filename": "t.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="Real contract text only, no images",
+    )
+    assert "image_urls" in db.column_names("ex10_exhibits")
+    # pending = done + image_urls NULL + has an image ref
+    pending = {r["accession"] for r in db.exhibits_pending_images(limit=10)}
+    assert pending == {"img-1"}  # txt-1 has no image ref
+    pid = next(r["id"] for r in db.exhibits_pending_images(limit=10))
+    db.update_image_urls(pid, ["https://hf/x/ex10-1_001.jpg"])
+    # now stored + no longer pending
+    assert db.exhibits_pending_images(limit=10) == []
+    row = next(r for r in db.recent_ex10() if r["accession"] == "img-1")
+    assert json.loads(row["image_urls"]) == ["https://hf/x/ex10-1_001.jpg"]

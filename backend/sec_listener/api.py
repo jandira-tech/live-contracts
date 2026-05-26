@@ -109,6 +109,7 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
         response.headers["Cache-Control"] = _DETAIL_CACHE
         out = dict(row)
         out["filing"] = _parse_filing(out.get("filing_metadata"))
+        out["image_urls"] = _parse_image_urls(out.get("image_urls"))
         return out
 
     return app
@@ -162,6 +163,16 @@ def _parse_filing(raw: str | None) -> dict:
     return val if isinstance(val, dict) else {}
 
 
+def _parse_image_urls(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        val = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    return [str(u) for u in val] if isinstance(val, list) else []
+
+
 def _summary(row: dict) -> dict:
     """List payload: metadata + a short excerpt, not the full markdown body."""
     md = row.get("markdown") or ""
@@ -186,6 +197,8 @@ def _summary(row: dict) -> dict:
         "items": filing.get("items", []),
         # Actual SEC acceptance time (ET, "YYYYMMDDHHMMSS"); "" until backfilled.
         "filed_at": filing.get("filed_at", ""),
+        # Public HF-dataset URLs for scanned (image-only) exhibits; [] otherwise.
+        "image_urls": _parse_image_urls(row.get("image_urls")),
     }
 
 

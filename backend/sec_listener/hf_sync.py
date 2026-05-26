@@ -26,7 +26,8 @@ PATH_IN_REPO = "data/exhibits.parquet"
 # Columns mirrored from ex10_exhibits (full markdown included; parquet compresses).
 _COLUMNS = [
     "id", "accession", "cik", "form_type", "doc_type", "filename", "description",
-    "sequence", "filing_url", "found_at", "markdown_status", "filing_metadata", "markdown",
+    "sequence", "filing_url", "found_at", "markdown_status", "filing_metadata",
+    "image_urls", "markdown",
 ]
 _STR_FIELDS = [c for c in _COLUMNS if c not in ("id", "markdown")]
 

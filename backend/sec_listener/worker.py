@@ -36,18 +36,23 @@ def _as_text(content) -> str:
 
 class BackfillWorker:
     def __init__(self, db: Database, *, fetcher=None, convert_fn=convert_html_to_markdown,
-                 metadata_fetcher=None, request_delay: float = 0.12, sleep_fn=time.sleep):
+                 metadata_fetcher=None, request_delay: float = 0.12, sleep_fn=time.sleep,
+                 image_token: str | None = None, image_repo: str | None = None, image_capture_fn=None):
         self.db = db
         # fetcher(accession, cik, filename) -> raw document content (str/bytes) or ""
         self.fetcher = fetcher or self._datamule_fetcher
         # metadata_fetcher(accession, cik) -> compact filing header dict
         self.metadata_fetcher = metadata_fetcher or self._datamule_metadata_fetcher
         self.convert_fn = convert_fn
-        # Per-request throttle for BOTH backfill loops (markdown + metadata): SEC
-        # caps clients at 10 req/s and a full batch fires that many sec.gov fetches
-        # back-to-back. Injectable so tests don't actually sleep.
+        # Per-request throttle for the sec.gov backfill loops (markdown + metadata +
+        # images): SEC caps clients at 10 req/s. Injectable so tests don't sleep.
         self.request_delay = request_delay
         self._sleep = sleep_fn
+        # Scanned-exhibit image capture -> HF dataset. Opt-in via image_token (HF_TOKEN).
+        self.image_token = image_token
+        from .images import DATASET_REPO as _IMG_REPO
+        self.image_repo = image_repo or _IMG_REPO
+        self._capture_images = image_capture_fn or self._datamule_capture_images
 
     def backfill_batch(self, limit: int = 25) -> int:
         """Convert up to ``limit`` pending exhibits. Returns the number converted."""
@@ -101,7 +106,43 @@ class BackfillWorker:
                 filled += 1
         return filled
 
+    def backfill_images_batch(self, limit: int = 25) -> int:
+        """Capture images for scanned (image-only) exhibits → HF dataset URLs.
+
+        Each converted exhibit is checked once: image-only rows get their image
+        URLs, others are marked '[]' (so they're not rescanned). No-op without a
+        token. Returns the number of rows for which images were captured.
+        """
+        if not self.image_token:
+            return 0
+        from .api import clean_excerpt
+        from .images import is_image_only
+
+        rows = self.db.exhibits_pending_images(limit=limit)
+        captured = 0
+        for row in rows:
+            if not is_image_only(row["markdown"], clean_excerpt_fn=clean_excerpt):
+                self.db.update_image_urls(row["id"], [])  # checked, not image-only
+                continue
+            if self.request_delay:
+                self._sleep(self.request_delay)  # respect SEC's 10 req/s cap
+            try:
+                urls = self._capture_images(row["accession"], row["cik"])
+            except Exception as exc:  # noqa: BLE001 - isolate each row
+                logger.warning("image capture failed for %s: %s", row["accession"], exc)
+                self.db.update_image_urls(row["id"], [])  # mark checked; don't loop forever
+                continue
+            self.db.update_image_urls(row["id"], urls)
+            if urls:
+                captured += 1
+        return captured
+
     # --- live fetch ---------------------------------------------------------
+    def _datamule_capture_images(self, accession: str, cik: str) -> list[str]:
+        from .images import capture_images
+
+        return capture_images(accession, cik, token=self.image_token, repo=self.image_repo)
+
     def _datamule_metadata_fetcher(self, accession: str, cik: str) -> dict:
         from datamule import Submission, format_accession
 
@@ -138,6 +179,9 @@ class BackfillWorker:
                 m = await asyncio.to_thread(self.backfill_metadata_batch, batch)
                 if m:
                     logger.info("Backfilled %d exhibits with filing metadata", m)
+                img = await asyncio.to_thread(self.backfill_images_batch, batch)
+                if img:
+                    logger.info("Captured images for %d scanned exhibits", img)
                 # If we did a full batch there is likely more; loop quickly but
                 # respect SEC rate limits. Otherwise idle longer.
                 await asyncio.sleep(interval if n < batch else max(1.0, batch / rps))
@@ -172,7 +216,7 @@ async def _run_all(config: Config):
     db = Database(config.db_path)
     db.init()
     listener = Listener(config, db)
-    worker = BackfillWorker(db)
+    worker = BackfillWorker(db, image_token=os.environ.get("HF_TOKEN"))
 
     tasks = [
         asyncio.create_task(listener.run(), name="listener"),
