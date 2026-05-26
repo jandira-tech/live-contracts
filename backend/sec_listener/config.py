@@ -22,6 +22,11 @@ class Config:
     convert_markdown: bool = True
     user_agent: str = _DEFAULT_UA
     alert_file: str = "ex10_alerts.log"
+    # Internal API (served in-process by the worker when serve_api is True).
+    serve_api: bool = False
+    api_host: str = "127.0.0.1"
+    api_port: int = 8799
+    api_key: str | None = None
 
     @property
     def min_request_interval(self) -> float:
@@ -37,4 +42,8 @@ class Config:
             convert_markdown=_bool(os.environ.get("SEC_CONVERT_MARKDOWN"), True),
             user_agent=os.environ.get("SEC_USER_AGENT", _DEFAULT_UA),
             alert_file=os.environ.get("SEC_ALERT_FILE", "ex10_alerts.log"),
+            serve_api=_bool(os.environ.get("SEC_SERVE_API"), False),
+            api_host=os.environ.get("SEC_API_HOST", "127.0.0.1"),
+            api_port=int(os.environ.get("SEC_API_PORT", "8799")),
+            api_key=os.environ.get("SEC_API_KEY") or None,
         )

@@ -26,7 +26,7 @@ from .config import Config
 from .converter import convert_html_to_markdown
 from .db import Database
 from .net import retry_async
-from .parsing import classify_documents, parse_rss_feed
+from .parsing import classify_documents, extract_filing_header, parse_rss_feed
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class Listener:
         )
 
         try:
-            ex10_docs, other_docs, filing_url = self.extractor(accession, cik)
+            ex10_docs, other_docs, filing_url, filing_metadata = self.extractor(accession, cik)
         except Exception as exc:  # noqa: BLE001 - robustness: never crash the loop
             logger.warning("extraction failed for %s: %s", accession, exc)
             return 0, 0
@@ -96,6 +96,7 @@ class Listener:
                     "url": filing_url,
                 },
                 markdown=markdown or None,
+                filing_metadata=filing_metadata or None,
             )
             logger.info("EX-10 saved: %s %s (%s)", accession, doc.get("type"), doc.get("filename"))
 
@@ -122,6 +123,7 @@ class Listener:
         formatted = format_accession(accession.replace("-", ""), "dash")
         url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{formatted}.txt"
         sub = Submission(url=url)
+        filing_metadata = extract_filing_header(sub.metadata.content)
         md_docs = sub.metadata.content.get("documents", [])
         ex10_meta, other_meta = classify_documents(md_docs)
 
@@ -139,7 +141,7 @@ class Listener:
         for d in ex10_meta:
             ex10_docs.append({**d, "content": content_by_key.get((d.get("type"), d.get("filename")))})
 
-        return ex10_docs, other_meta, url
+        return ex10_docs, other_meta, url, filing_metadata
 
     # --- live polling loop ---------------------------------------------------
     async def _rate_limit(self):
