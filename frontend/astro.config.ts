@@ -6,7 +6,7 @@ import cloudflare from '@astrojs/cloudflare';
 // Workers; the CDN caches responses (Cache-Control + stale-while-revalidate set
 // per-route and at the API origin).
 export default defineConfig({
-  site: 'https://sec-ex10.example.workers.dev',
+  site: 'https://contracts-live.arthur.law',
   output: 'server',
   adapter: cloudflare({
     imageService: 'passthrough',

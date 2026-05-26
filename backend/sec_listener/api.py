@@ -142,9 +142,11 @@ def _parse_filing(raw: str | None) -> dict:
     if not raw:
         return {}
     try:
-        return json.loads(raw)
+        val = json.loads(raw)
     except (ValueError, TypeError):
         return {}
+    # Valid JSON that isn't an object (list/str/number) would break downstream .get().
+    return val if isinstance(val, dict) else {}
 
 
 def _summary(row: dict) -> dict:

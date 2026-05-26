@@ -86,13 +86,19 @@ def extract_filing_header(content: dict | None) -> dict:
     if not content:
         return header
 
+    # Malformed SGML can parse any of these sections as a non-dict (str/list/number);
+    # guard every level so a single bad filing never raises into the listener loop.
     filer = content.get("filer")
     if isinstance(filer, list):
         filer = filer[0] if filer else {}
-    filer = filer or {}
-    company = filer.get("company-data") or {}
-    values = filer.get("filing-values") or {}
-    addr = filer.get("business-address") or {}
+    if not isinstance(filer, dict):
+        filer = {}
+    company = filer.get("company-data")
+    company = company if isinstance(company, dict) else {}
+    values = filer.get("filing-values")
+    values = values if isinstance(values, dict) else {}
+    addr = filer.get("business-address")
+    addr = addr if isinstance(addr, dict) else {}
 
     header["company_name"] = company.get("conformed-name", "") or ""
     header["cik"] = company.get("cik", "") or ""

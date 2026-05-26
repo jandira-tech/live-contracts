@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import time
 
 from .config import Config
 from .converter import convert_html_to_markdown
@@ -34,13 +35,18 @@ def _as_text(content) -> str:
 
 class BackfillWorker:
     def __init__(self, db: Database, *, fetcher=None, convert_fn=convert_html_to_markdown,
-                 metadata_fetcher=None):
+                 metadata_fetcher=None, metadata_request_delay: float = 0.12, sleep_fn=time.sleep):
         self.db = db
         # fetcher(accession, cik, filename) -> raw document content (str/bytes) or ""
         self.fetcher = fetcher or self._datamule_fetcher
         # metadata_fetcher(accession, cik) -> compact filing header dict
         self.metadata_fetcher = metadata_fetcher or self._datamule_metadata_fetcher
         self.convert_fn = convert_fn
+        # Per-request throttle for the metadata backfill loop: SEC caps clients at
+        # 10 req/s, and a full batch fires that many sec.gov fetches back-to-back.
+        # Injectable so tests don't actually sleep.
+        self.metadata_request_delay = metadata_request_delay
+        self._sleep = sleep_fn
 
     def backfill_batch(self, limit: int = 25) -> int:
         """Convert up to ``limit`` pending exhibits. Returns the number converted."""
@@ -78,6 +84,8 @@ class BackfillWorker:
         rows = self.db.exhibits_missing_filing_metadata(limit=limit)
         filled = 0
         for row in rows:
+            if self.metadata_request_delay:
+                self._sleep(self.metadata_request_delay)  # respect SEC's 10 req/s cap
             try:
                 meta = self.metadata_fetcher(row["accession"], row["cik"])
             except Exception as exc:  # noqa: BLE001 - isolate each row

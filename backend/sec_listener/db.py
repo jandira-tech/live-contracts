@@ -98,7 +98,10 @@ class Database:
         filing_metadata: dict | None = None,
     ) -> None:
         status = "done" if markdown else "pending"
-        meta_json = json.dumps(filing_metadata) if filing_metadata else None
+        # Distinguish "no metadata supplied" (None -> NULL, still pending backfill)
+        # from "processed, but headerless" ({} -> '{}', a terminal state). Using a
+        # falsy check would collapse {} to NULL and re-queue it forever.
+        meta_json = json.dumps(filing_metadata) if filing_metadata is not None else None
         with self.connect() as conn:
             conn.execute(
                 """

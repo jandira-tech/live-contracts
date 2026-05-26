@@ -109,3 +109,19 @@ def test_fetch_error_marked_error_and_isolated(db):
     assert statuses["bad-1"] == "error"
     # error rows are not retried automatically
     assert db.exhibits_missing_markdown(limit=10) == []
+
+
+def test_metadata_backfill_throttles_between_requests(db):
+    """Each metadata fetch must be preceded by a rate-limit delay (SEC 10 RPS)."""
+    _add(db, "rl-1")
+    _add(db, "rl-2")
+    slept: list[float] = []
+    worker = BackfillWorker(
+        db,
+        metadata_fetcher=lambda a, c: {"company_name": "X"},
+        sleep_fn=slept.append,
+    )
+    worker.backfill_metadata_batch(limit=10)
+    # one throttle per row, at the configured delay
+    assert slept == [worker.metadata_request_delay, worker.metadata_request_delay]
+    assert all(d > 0 for d in slept)

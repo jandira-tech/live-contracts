@@ -43,7 +43,7 @@ Worker can reach it.
 
 ```bash
 cd frontend
-pnpm install && pnpm build          # astro build + Pagefind index
+bun install && bun run build        # astro build
 wrangler kv namespace create SESSION # once; put id in wrangler.jsonc
 wrangler secret put SEC_API_KEY      # the key the API expects
 # set SEC_API_URL in wrangler.jsonc -> https://sec-api.internal.<your-domain>
@@ -55,7 +55,7 @@ Live deployment: **https://sec-ex10-frontend.cicero-im.workers.dev**
 - Prerendered (archive/detail/search) work from the build snapshot regardless of
   the API. The live homepage feed needs the tunnel + `SEC_API_KEY` set; until then
   it degrades gracefully ("temporarily unavailable").
-- Re-run `pnpm build && wrangler deploy` to refresh the prerendered snapshot
+- Re-run `bun run build && wrangler deploy` to refresh the prerendered snapshot
   (e.g. via cron) so the static archive stays current.
 
 ## Caching
