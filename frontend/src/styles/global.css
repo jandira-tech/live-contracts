@@ -152,6 +152,8 @@ a:hover { text-decoration: underline; text-decoration-color: var(--accent); text
 .prose td, .prose th { border: 1px solid var(--border); padding: 0.4rem 0.6rem; }
 
 footer.site { border-top: 1px solid var(--border); color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 1.5rem 0; margin-top: 3rem; }
+/* Emphasis via color, not weight — Departure Mono is regular-only (no faux bold). */
+footer.site .footer-strong { color: var(--text); }
 
 #search { margin: 1rem 0; }
 
