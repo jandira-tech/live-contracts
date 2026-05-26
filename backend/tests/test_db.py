@@ -17,6 +17,32 @@ def test_init_creates_ex10_table_with_markdown_column(db):
     cols = db.column_names("ex10_exhibits")
     assert "markdown" in cols
     assert "filing_url" in cols
+    assert "filing_metadata" in cols
+
+
+def test_save_and_read_filing_metadata(db):
+    meta = {"company_name": "Lamb Weston Holdings, Inc.", "period": "20260519",
+            "items": ["Entry into a Material Definitive Agreement"]}
+    db.save_ex10_exhibit(
+        {"accession": "m-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "a.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="body", filing_metadata=meta,
+    )
+    rows = db.recent_ex10()
+    import json
+    assert json.loads(rows[0]["filing_metadata"])["company_name"] == "Lamb Weston Holdings, Inc."
+
+
+def test_missing_filing_metadata_and_update(db):
+    db.save_ex10_exhibit(
+        {"accession": "m-2", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "b.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="body", filing_metadata=None,
+    )
+    missing = db.exhibits_missing_filing_metadata(limit=10)
+    assert len(missing) == 1
+    db.update_filing_metadata(missing[0]["id"], {"company_name": "X"})
+    assert db.exhibits_missing_filing_metadata(limit=10) == []
 
 
 def test_migration_adds_markdown_to_legacy_table(tmp_path):
@@ -117,3 +143,16 @@ def test_since_returns_only_recent_rows(db):
     assert recent[0]["accession"] == "0001-26-000003"
     # A wide window picks up both.
     assert len(db.ex10_since(seconds=7200)) == 2
+
+
+def test_empty_filing_metadata_persists_not_null(db):
+    """An empty {} (a processed-but-headerless filing) must persist as '{}', not NULL,
+    so the backfill worker does not re-select it as missing forever."""
+    db.save_ex10_exhibit(
+        {"accession": "em-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "e.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="body", filing_metadata={},
+    )
+    rows = db.recent_ex10()
+    assert rows[0]["filing_metadata"] == "{}"
+    assert db.exhibits_missing_filing_metadata(limit=10) == []

@@ -1,0 +1,58 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+  /** Inject <meta refresh> for live auto-refresh pages. */
+  refreshSeconds?: number;
+}
+
+const {
+  title = 'SEC EX-10 Live — Material Contracts',
+  description = 'Real-time feed of EX-10 material contract exhibits filed with the SEC.',
+  refreshSeconds,
+} = Astro.props;
+
+// Active nav state from the current path.
+const path = Astro.url.pathname;
+const isLive = path === '/';
+const isBrowse = path.startsWith('/agreement'); // /agreements/* and /agreement/*
+const isSearch = path.startsWith('/search');
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    {refreshSeconds ? <meta http-equiv="refresh" content={String(refreshSeconds)} /> : null}
+    <title>{title}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📄</text></svg>" />
+  </head>
+  <body>
+    <nav class="sl-nav">
+      <div class="sl-nav-inner">
+        <a class="sl-wordmark" href="/">SEC<span class="dot">·</span>LIVECONTRACTS<span class="tag">EX-10 FEED</span></a>
+        <ul class="sl-nav-links">
+          <li><a class:list={['sl-nav-link', { 'is-active': isLive }]} href="/"><span class="live-dot"></span>LIVE</a></li>
+          <li><a class:list={['sl-nav-link', { 'is-active': isBrowse }]} href="/agreements/1">BROWSE</a></li>
+          <li><a class:list={['sl-nav-link', { 'is-active': isSearch }]} href="/search">SEARCH</a></li>
+        </ul>
+      </div>
+    </nav>
+    <main class="container">
+      <slot />
+    </main>
+    <footer class="site">
+      <div class="container">
+        Material contract (EX-10) exhibits extracted from SEC EDGAR in near real time.
+        Data is public SEC filing information. Not legal or investment advice.
+      </div>
+    </footer>
+  </body>
+</html>
