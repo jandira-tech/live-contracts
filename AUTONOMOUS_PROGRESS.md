@@ -48,10 +48,21 @@ Frontend deployed: https://sec-ex10-frontend.cicero-im.workers.dev
 - [ ] Cap/paginate prerendered detail pages as the dataset grows (build time).
 - [ ] Stats endpoint (/api/stats), JSON feed.
 
-## Loop behaviour on re-entry
+## Extra PRs (polish, also open)
 
-Build is DONE — do NOT rebuild from scratch. Read this file, then:
-1. Health-check worker + API (restart if down).
-2. Confirm backfill pending stays low.
-3. Pick one polish-backlog item, do it TDD + small commit/PR.
-4. Refresh deployed snapshot at most ~once/hour.
+- [x] **PR #7** `feat/ops-supervision` — worker serves API in-process; one supervised process.
+- [x] **PR #8** `feat/frontend-freshness` — clean card excerpts + `frontend/redeploy.sh`.
+
+## Loop behaviour on re-entry (MAINTENANCE MODE)
+
+Build is DONE — do NOT rebuild from scratch. Read this file, then each wake:
+1. Health-check worker + API at 127.0.0.1:8799 (restart unified worker if down:
+   `setsid nohup env SEC_RUN_HOURS=0 SEC_SERVE_API=true .venv/bin/python -m sec_listener.worker >> sec-listener.log 2>&1 < /dev/null &`).
+2. Confirm markdown-backfill pending stays low.
+3. Every ~hour (≈ every 2nd wake): `cd frontend && ./redeploy.sh` to refresh the
+   public snapshot, then spot-check with agent-browser.
+4. If build time grows large (dataset → thousands), cap prerendered detail pages
+   to most-recent N (listAllEx10 cap) — top remaining polish item.
+5. Otherwise pick a polish-backlog item, TDD + small stacked PR.
+
+Current worker pid: see `sec-listener.pid`. Deployed: sec-ex10-frontend.cicero-im.workers.dev
