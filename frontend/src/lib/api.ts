@@ -70,6 +70,26 @@ export async function ex10Detail(id: number | string): Promise<Ex10Detail | null
   return getJson<Ex10Detail | null>(`/api/ex10/${id}`, null);
 }
 
+export interface Stats {
+  total: number;
+  with_markdown: number;
+  pending_markdown: number;
+  last_24h: number;
+  by_doc_type: Record<string, number>;
+  by_form_type: Record<string, number>;
+}
+
+export function ex10Stats(): Promise<Stats> {
+  return getJson<Stats>('/api/stats', {
+    total: 0,
+    with_markdown: 0,
+    pending_markdown: 0,
+    last_24h: 0,
+    by_doc_type: {},
+    by_form_type: {},
+  });
+}
+
 /** Build-time helper: page through the whole collection for prerendering. */
 export async function listAllEx10(pageSize = 100, max = 5000): Promise<Ex10Summary[]> {
   const all: Ex10Summary[] = [];

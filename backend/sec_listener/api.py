@@ -72,6 +72,11 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
             "items": [_summary(i) for i in items],
         }
 
+    @app.get("/api/stats", dependencies=[Depends(require_key)])
+    def stats(response: Response):
+        response.headers["Cache-Control"] = _LIST_CACHE
+        return db.stats()
+
     @app.get("/api/ex10/{exhibit_id}", dependencies=[Depends(require_key)])
     def ex10_detail(exhibit_id: int, response: Response):
         with db.connect() as conn:

@@ -2,7 +2,7 @@
 import Base from '../layouts/Base.astro';
 import AgreementCard from '../components/AgreementCard.astro';
 import { getLiveCollection } from 'astro:content';
-import type { Ex10Summary } from '../lib/api';
+import { ex10Stats, type Ex10Summary } from '../lib/api';
 
 // Live, request-time: agreements found in the last 60 seconds. Page auto-refreshes
 // every 60s (Base refreshSeconds) so the window always shows the newest material
@@ -10,12 +10,18 @@ import type { Ex10Summary } from '../lib/api';
 const WINDOW = 60;
 const { entries, error } = await getLiveCollection('agreements', { filter: { seconds: WINDOW } });
 const items: Ex10Summary[] = (entries ?? []).map((e) => e.data as Ex10Summary);
+const stats = await ex10Stats();
 ---
 <Base refreshSeconds={WINDOW}>
   <section class="hero">
     <div class="live-banner"><span class="live-dot"></span> LIVE · refreshing every {WINDOW}s</div>
     <h1>New agreements in the last {WINDOW} seconds</h1>
     <p>Traditional EX-10 material contract exhibits, the moment they hit SEC EDGAR.</p>
+    <div class="stats-strip">
+      <span><strong>{stats.total.toLocaleString()}</strong> total</span>
+      <span><strong>{stats.last_24h.toLocaleString()}</strong> in last 24h</span>
+      <span><strong>{stats.with_markdown.toLocaleString()}</strong> with markdown</span>
+    </div>
   </section>
 
   {error ? (

@@ -194,6 +194,34 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def stats(self) -> dict[str, Any]:
+        """Aggregate counts for the stats endpoint."""
+        with self.connect() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM ex10_exhibits").fetchone()[0]
+            with_md = conn.execute(
+                "SELECT COUNT(*) FROM ex10_exhibits WHERE markdown_status = 'done'"
+            ).fetchone()[0]
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM ex10_exhibits WHERE markdown_status IS NULL OR markdown_status = 'pending'"
+            ).fetchone()[0]
+            last_24h = conn.execute(
+                "SELECT COUNT(*) FROM ex10_exhibits WHERE found_at >= datetime('now','-1 day')"
+            ).fetchone()[0]
+            by_doc = conn.execute(
+                "SELECT doc_type, COUNT(*) c FROM ex10_exhibits GROUP BY doc_type ORDER BY c DESC"
+            ).fetchall()
+            by_form = conn.execute(
+                "SELECT form_type, COUNT(*) c FROM ex10_exhibits GROUP BY form_type ORDER BY c DESC"
+            ).fetchall()
+        return {
+            "total": total,
+            "with_markdown": with_md,
+            "pending_markdown": pending,
+            "last_24h": last_24h,
+            "by_doc_type": {r[0]: r[1] for r in by_doc},
+            "by_form_type": {r[0]: r[1] for r in by_form},
+        }
+
     def exhibits_missing_markdown(self, limit: int = 100) -> list[dict[str, Any]]:
         """Rows awaiting markdown conversion.
 
