@@ -195,10 +195,15 @@ class Database:
         return [dict(r) for r in rows]
 
     def exhibits_missing_markdown(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Rows awaiting markdown conversion.
+
+        Keyed off ``markdown_status``: ``NULL``/``pending`` are eligible; ``done``,
+        ``empty`` and ``error`` are terminal and never re-queued automatically.
+        """
         with self.connect() as conn:
             rows = conn.execute(
                 """SELECT * FROM ex10_exhibits
-                   WHERE markdown IS NULL OR markdown = ''
+                   WHERE markdown_status IS NULL OR markdown_status = 'pending'
                    ORDER BY found_at DESC, id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
