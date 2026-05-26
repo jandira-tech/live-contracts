@@ -79,6 +79,7 @@ def extract_filing_header(content: dict | None) -> dict:
         "state_of_incorporation": "",
         "period": "",
         "filing_date": "",
+        "filed_at": "",
         "file_number": "",
         "location": "",
         "items": [],
@@ -108,6 +109,8 @@ def extract_filing_header(content: dict | None) -> dict:
     header["file_number"] = values.get("file-number", "") or ""
     header["period"] = content.get("period", "") or ""
     header["filing_date"] = content.get("filing-date", "") or ""
+    # Actual SEC acceptance timestamp (ET), "YYYYMMDDHHMMSS" — the real filing time.
+    header["filed_at"] = content.get("acceptance-datetime", "") or ""
 
     city, state = addr.get("city", ""), addr.get("state", "")
     header["location"] = ", ".join(p for p in (city, state) if p)
