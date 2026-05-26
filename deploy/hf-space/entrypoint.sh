@@ -13,5 +13,10 @@ if [ ! -f "${SEC_DB_PATH}" ] && [ -f /home/user/app/seed.db ]; then
   cp /home/user/app/seed.db "${SEC_DB_PATH}"
 fi
 
+# Restore from the HF dataset (durable source of truth) when it's larger than the
+# seed — so a fresh container catches up to accumulated history. No-op without HF_TOKEN.
+echo "[entrypoint] restoring from HF dataset if newer"
+python -m sec_listener.boot_restore || echo "[entrypoint] boot restore skipped/failed (continuing)"
+
 echo "[entrypoint] starting worker (listener + backfill + API on :${SEC_API_PORT})"
 exec python -m sec_listener.worker
