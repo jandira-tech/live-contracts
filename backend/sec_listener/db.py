@@ -6,6 +6,7 @@ All connections use WAL mode so the listener can write while the API reads.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
@@ -77,6 +78,7 @@ class Database:
             )
             self._ensure_column(conn, "ex10_exhibits", "markdown", "TEXT")
             self._ensure_column(conn, "ex10_exhibits", "markdown_status", "TEXT")
+            self._ensure_column(conn, "ex10_exhibits", "filing_metadata", "TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ex10_found_at ON ex10_exhibits(found_at)"
             )
@@ -89,15 +91,24 @@ class Database:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     # --- writes -------------------------------------------------------------
-    def save_ex10_exhibit(self, exhibit: dict[str, Any], markdown: str | None = None) -> None:
+    def save_ex10_exhibit(
+        self,
+        exhibit: dict[str, Any],
+        markdown: str | None = None,
+        filing_metadata: dict | None = None,
+    ) -> None:
         status = "done" if markdown else "pending"
+        # Distinguish "no metadata supplied" (None -> NULL, still pending backfill)
+        # from "processed, but headerless" ({} -> '{}', a terminal state). Using a
+        # falsy check would collapse {} to NULL and re-queue it forever.
+        meta_json = json.dumps(filing_metadata) if filing_metadata is not None else None
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO ex10_exhibits
                 (accession, cik, form_type, doc_type, filename, description,
-                 sequence, filing_url, markdown, markdown_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 sequence, filing_url, markdown, markdown_status, filing_metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     exhibit.get("accession"),
@@ -110,6 +121,7 @@ class Database:
                     exhibit.get("url") or exhibit.get("filing_url"),
                     markdown,
                     status,
+                    meta_json,
                 ),
             )
             conn.commit()
@@ -170,12 +182,29 @@ class Database:
             )
             conn.commit()
 
+    def update_filing_metadata(self, exhibit_id: int, filing_metadata: dict) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE ex10_exhibits SET filing_metadata = ? WHERE id = ?",
+                (json.dumps(filing_metadata), exhibit_id),
+            )
+            conn.commit()
+
     # --- reads --------------------------------------------------------------
+    # List/search payloads only need a short excerpt, so we truncate the markdown
+    # column in SQL (SUBSTR) instead of loading multi-MB contract bodies into
+    # memory per row — important on small hosts. Detail reads use SELECT *.
+    _SUMMARY_COLS = (
+        "id, accession, cik, form_type, doc_type, filename, description, sequence, "
+        "filing_url, found_at, markdown_status, filing_metadata, "
+        "SUBSTR(markdown, 1, 2000) AS markdown"
+    )
+
     def recent_ex10(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
-                """SELECT * FROM ex10_exhibits
-                   ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
+                f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
+                    ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
                 (limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -187,10 +216,83 @@ class Database:
     def ex10_since(self, seconds: int) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
-                """SELECT * FROM ex10_exhibits
-                   WHERE found_at >= datetime('now', ?)
-                   ORDER BY found_at DESC, id DESC""",
+                f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
+                    WHERE found_at >= datetime('now', ?)
+                    ORDER BY found_at DESC, id DESC""",
                 (f"-{int(seconds)} seconds",),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def stats(self) -> dict[str, Any]:
+        """Aggregate counts for the stats endpoint."""
+        with self.connect() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM ex10_exhibits").fetchone()[0]
+            with_md = conn.execute(
+                "SELECT COUNT(*) FROM ex10_exhibits WHERE markdown_status = 'done'"
+            ).fetchone()[0]
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM ex10_exhibits WHERE markdown_status IS NULL OR markdown_status = 'pending'"
+            ).fetchone()[0]
+            last_24h = conn.execute(
+                "SELECT COUNT(*) FROM ex10_exhibits WHERE found_at >= datetime('now','-1 day')"
+            ).fetchone()[0]
+            by_doc = conn.execute(
+                "SELECT doc_type, COUNT(*) c FROM ex10_exhibits GROUP BY doc_type ORDER BY c DESC"
+            ).fetchall()
+            by_form = conn.execute(
+                "SELECT form_type, COUNT(*) c FROM ex10_exhibits GROUP BY form_type ORDER BY c DESC"
+            ).fetchall()
+        return {
+            "total": total,
+            "with_markdown": with_md,
+            "pending_markdown": pending,
+            "last_24h": last_24h,
+            "by_doc_type": {r[0]: r[1] for r in by_doc},
+            "by_form_type": {r[0]: r[1] for r in by_form},
+        }
+
+    @staticmethod
+    def _like_term(query: str) -> str:
+        """Escape LIKE wildcards so user-typed % and _ match literally."""
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
+
+    def search(self, query: str, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+        """Case-insensitive substring search over description + markdown."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        like = self._like_term(q)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
+                    WHERE description LIKE ? ESCAPE '\\' COLLATE NOCASE
+                       OR markdown LIKE ? ESCAPE '\\' COLLATE NOCASE
+                    ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
+                (like, like, limit, offset),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def search_count(self, query: str) -> int:
+        q = (query or "").strip()
+        if not q:
+            return 0
+        like = self._like_term(q)
+        with self.connect() as conn:
+            return conn.execute(
+                """SELECT COUNT(*) FROM ex10_exhibits
+                   WHERE description LIKE ? ESCAPE '\\' COLLATE NOCASE
+                      OR markdown LIKE ? ESCAPE '\\' COLLATE NOCASE""",
+                (like, like),
+            ).fetchone()[0]
+
+    def exhibits_missing_filing_metadata(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT id, accession, cik, filename FROM ex10_exhibits
+                   WHERE filing_metadata IS NULL
+                   ORDER BY found_at DESC, id DESC LIMIT ?""",
+                (limit,),
             ).fetchall()
         return [dict(r) for r in rows]
 
