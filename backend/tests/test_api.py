@@ -94,3 +94,15 @@ def test_cache_headers_present_for_swr(db):
     r = client.get("/api/ex10/since", params={"seconds": 60})
     # stale-while-revalidate hint for the CDN edge
     assert "stale-while-revalidate" in r.headers.get("cache-control", "")
+
+
+def test_parse_filing_rejects_non_dict_json():
+    """_parse_filing must return {} for valid-but-non-object JSON, so downstream
+    .get() calls never hit a list/str/number."""
+    from sec_listener.api import _parse_filing
+    assert _parse_filing(None) == {}
+    assert _parse_filing("") == {}
+    assert _parse_filing("[1, 2]") == {}
+    assert _parse_filing('"a string"') == {}
+    assert _parse_filing("42") == {}
+    assert _parse_filing('{"company_name": "X"}') == {"company_name": "X"}

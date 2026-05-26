@@ -1,36 +1,40 @@
-# SEC EX-10 Live — Frontend (Astro 6, hybrid SSR)
+# SEC EX-10 Live — Frontend (Astro 6, fully live SSR)
 
-Astro 6 app deployed to **Cloudflare Workers**. Hybrid: the live feed is
-server-rendered at request time; the archive, detail pages and search index are
-prerendered for speed + Pagefind.
+Astro 6 app on **Cloudflare Workers**. Every page is **live SSR** — fetched from
+the backend API at request time, cached at the edge (CDN + stale-while-revalidate).
+**No rebuilds or redeploys** are needed when content changes; deploy only for code.
 
 ## Architecture
 
-- **Live homepage** (`/`) — `getLiveCollection('agreements', { filter: { seconds: 60 } })`
-  via a **Live Content Collection** loader (`src/live.config.ts` + `src/loaders/sec-api.ts`).
-  Fetches at request time; auto-refreshes every 60s (`<meta refresh>`).
-- **Archive** (`/agreements/[page]`) — prerendered with Astro's native `paginate()`.
-- **Detail** (`/agreement/[id]`) — prerendered; markdown rendered to HTML.
-- **Search** (`/search`) — **Pagefind** full-text search over the prerendered pages.
-- **Edge caching** — `Cache-Control: ... stale-while-revalidate` set at the API
-  origin; the Cloudflare CDN serves cached responses instantly while revalidating.
+```
+HF Space (FastAPI: listener + backfill + API, key-gated)
+        ▲  request-time fetch (SEC_API_URL + SEC_API_KEY)
+Cloudflare Worker (Astro SSR)  ──CDN / stale-while-revalidate──▶ users
+```
 
-## Data source
+- **Homepage** (`/`) — Live Content Collection: agreements in the last 60s, 60s auto-refresh.
+- **Archive** (`/agreements/[page]`) — live SSR, paginated.
+- **Detail** (`/agreement/[id]`) — live SSR via `getLiveEntry`; markdown → HTML.
+- **Search** (`/search?q=`) — live full-text search against `/api/search` (replaced Pagefind).
+- **Stats strip** — live `/api/stats`.
 
-All data comes from the internal FastAPI API (`SEC_API_URL`, default
-`http://127.0.0.1:8799`). The API is **private** — the Worker reaches it over a
-Cloudflare Tunnel / private network carrying `SEC_API_KEY`. Never public.
+## Config (`astro:env`, server)
 
-Env is declared via `astro:env` (`astro.config.ts`): `SEC_API_URL`, `SEC_API_KEY`
-(both server secrets).
+| Var | Meaning |
+|-----|---------|
+| `SEC_API_URL` | Backend base URL (the HF Space). Set in `wrangler.jsonc`. |
+| `SEC_API_KEY` | API key (`X-API-Key`). Set as a Worker secret: `wrangler secret put SEC_API_KEY`. |
 
-## Develop / build / deploy
+Local dev: put both in `.env`.
+
+## Develop / deploy
 
 ```bash
-pnpm install
-echo 'SEC_API_URL=http://127.0.0.1:8799' > .env   # local
-pnpm dev                                           # http://localhost:4321
-pnpm build                                         # astro build + Pagefind index
-pnpm test:smoke                                    # route smoke test (server must be running)
-pnpm dlx wrangler deploy                           # deploy the Worker
+bun install
+bun run dev              # http://localhost:4321
+bun run build            # fast — only /404 is static; everything else is SSR
+bun run test:smoke       # BASE=<url> node test/smoke.mjs
+wrangler deploy          # deploy code changes (content needs no redeploy)
 ```
+
+Live: **https://sec-ex10-frontend.cicero-im.workers.dev**
