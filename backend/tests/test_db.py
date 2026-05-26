@@ -202,3 +202,15 @@ def test_insert_exhibits_bulk_inserts_and_ignores_dups(db):
     rows = {r["accession"]: r for r in db.recent_ex10()}
     assert rows["b-1"]["found_at"] == "2026-05-26 10:00:00"  # preserved, not now()
     assert rows["b-1"]["markdown_status"] == "done"
+
+
+def test_insert_exhibits_bulk_maps_empty_to_null(db):
+    # Synced parquet coerces missing fields to "" — restore must map them back to
+    # NULL so backfill queries still pick the row up.
+    db.insert_exhibits_bulk([
+        {"accession": "r1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1", "filename": "r.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 10:00:00",
+         "markdown": "", "markdown_status": "", "filing_metadata": ""},
+    ])
+    assert [r["accession"] for r in db.exhibits_missing_markdown(limit=10)] == ["r1"]  # "" -> NULL -> pending
+    assert db.recent_ex10()[0]["filing_metadata"] is None

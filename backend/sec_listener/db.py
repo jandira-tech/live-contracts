@@ -207,8 +207,8 @@ class Database:
                     (
                         r.get("accession"), r.get("cik"), r.get("form_type"), r.get("doc_type"),
                         r.get("filename"), r.get("description"), r.get("sequence"),
-                        r.get("filing_url"), r.get("found_at"), r.get("markdown") or "",
-                        r.get("markdown_status"), r.get("filing_metadata"),
+                        r.get("filing_url"), r.get("found_at"), r.get("markdown") or None,
+                        r.get("markdown_status") or None, r.get("filing_metadata") or None,
                     ),
                 )
                 inserted += cur.rowcount
