@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response
 
@@ -85,6 +86,30 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
     return app
 
 
+_MD_MARKERS = re.compile(r"\*+|_{2,}|`+|#+|>+|\[|\]|!\[")
+
+
+def clean_excerpt(text: str | None, limit: int = 280) -> str:
+    """Turn raw markdown into a clean one-line preview.
+
+    Strips emphasis/heading/table markers and pipes, collapses whitespace, and
+    truncates on a word boundary with an ellipsis. Keeps card previews readable
+    instead of showing ``| | | --- |`` table noise.
+    """
+    if not text:
+        return ""
+    s = text.replace("|", " ")
+    s = _MD_MARKERS.sub("", s)
+    s = re.sub(r"-{2,}", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    if len(s) <= limit:
+        return s
+    cut = s[:limit]
+    if " " in cut:
+        cut = cut[: cut.rfind(" ")]
+    return cut.rstrip() + "…"
+
+
 def _summary(row: dict) -> dict:
     """List payload: metadata + a short excerpt, not the full markdown body."""
     md = row.get("markdown") or ""
@@ -99,7 +124,7 @@ def _summary(row: dict) -> dict:
         "filing_url": row.get("filing_url"),
         "found_at": row.get("found_at"),
         "markdown_status": row.get("markdown_status"),
-        "excerpt": md[:280],
+        "excerpt": clean_excerpt(md, 280),
         "has_markdown": bool(md),
     }
 
