@@ -44,3 +44,11 @@ def test_respects_limit_without_cutting_midword():
 def test_empty_input():
     assert clean_excerpt("", limit=10) == ""
     assert clean_excerpt(None, limit=10) == ""
+
+
+def test_exhibit_label_stripped_only_at_start():
+    md = "Exhibit 10.1 This Agreement references Exhibit 10.2 for the schedule of fees."
+    out = clean_excerpt(md, 200)
+    assert not out.lower().startswith("exhibit 10.1")  # leading label removed
+    assert "Exhibit 10.2" in out                        # mid-body reference preserved
+    assert out.startswith("This Agreement")

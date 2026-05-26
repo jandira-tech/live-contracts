@@ -118,8 +118,9 @@ _MD_MARKERS = re.compile(r"\*+|_{2,}|`+|#+|>+|\[|\]|!\[")
 # Image references markitdown emits for scanned exhibits, e.g.
 # `(ex10-3_001.jpg)` or `(exhibit101facilityagreem001.jpg "slide1")`.
 _IMG_REF = re.compile(r"\([^()]*\.(?:jpe?g|png|gif|svg|webp)(?:\s+\"[^\"]*\")?[^()]*\)", re.I)
-# Exhibit labels — pure metadata, not contract content: "Exhibit 10.1", "EX-10.3".
-_EXHIBIT_LABEL = re.compile(r"(?i)\b(?:exhibit|ex)[\s.\-]*\d+(?:\.\d+)?\b")
+# Leading exhibit label(s) — pure metadata at the START ("Exhibit 10.1", "EX-10.3").
+# Anchored so mid-body references ("...subject to Exhibit 10.2...") are preserved.
+_LEADING_LABEL = re.compile(r"^\s*(?:(?:exhibit|ex)[\s.\-]*\d+(?:\.\d+)?\b\s*)+", re.I)
 
 
 def clean_excerpt(text: str | None, limit: int = 280) -> str:
@@ -134,13 +135,13 @@ def clean_excerpt(text: str | None, limit: int = 280) -> str:
     if not text:
         return ""
     s = text.replace("|", " ")
-    s = _IMG_REF.sub(" ", s)
-    s = _EXHIBIT_LABEL.sub(" ", s)
+    s = _IMG_REF.sub(" ", s)                   # image refs are noise anywhere
     s = _MD_MARKERS.sub("", s)
     s = re.sub(r"-{2,}", " ", s)
     s = re.sub(r"[ \t]+", " ", s)              # collapse horizontal whitespace
     s = re.sub(r"[ \t]*\n[ \t]*", "\n", s)     # trim around newlines
     s = re.sub(r"\n{2,}", "\n", s).strip()     # blank-line runs -> single break
+    s = _LEADING_LABEL.sub("", s).strip()      # strip only LEADING exhibit label(s)
     if len(s) <= limit:
         return s
     cut = s[:limit]

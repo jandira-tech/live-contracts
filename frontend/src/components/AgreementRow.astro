@@ -15,7 +15,7 @@ const pill = item.company_name?.trim() || item.doc_type;
   <div class="sl-row-meta">
     <span class="sl-filer-tag">{pill}</span>
     <span class="form-pill">{item.form_type}</span>
-    <span class="meta-line">{item.doc_type}</span>
+    {item.company_name?.trim() ? <span class="meta-line">{item.doc_type}</span> : null}
     <span class="meta-line">CIK {item.cik}</span>
     <span class="meta-line">{item.accession}</span>
   </div>
