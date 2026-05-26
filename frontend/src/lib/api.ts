@@ -39,6 +39,7 @@ export interface Ex10Summary {
   location?: string;
   items?: string[];
   filed_at?: string; // SEC acceptance datetime "YYYYMMDDHHMMSS" (ET); "" until backfilled
+  image_urls?: string[]; // HF-dataset URLs for scanned (image-only) exhibits; [] otherwise
 }
 
 export interface Ex10Detail extends Ex10Summary {
@@ -76,14 +77,28 @@ async function getJson<T>(path: string, fallback: T): Promise<T> {
   }
 }
 
-export function listEx10(page = 1, pageSize = 20): Promise<PageResult> {
-  return getJson<PageResult>(`/api/ex10?page=${page}&page_size=${pageSize}`, {
-    items: [],
-    total: 0,
-    page,
-    page_size: pageSize,
-    total_pages: 0,
+export interface BrowseFilters {
+  form?: string;
+  cik?: string;
+  filer?: string;
+  sort?: 'newest' | 'oldest';
+}
+
+export function listEx10(page = 1, pageSize = 20, filters: BrowseFilters = {}): Promise<PageResult> {
+  const qs = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  if (filters.form) qs.set('form', filters.form);
+  if (filters.cik) qs.set('cik', filters.cik);
+  if (filters.filer) qs.set('filer', filters.filer);
+  if (filters.sort === 'oldest') qs.set('sort', 'oldest');
+  return getJson<PageResult>(`/api/ex10?${qs}`, {
+    items: [], total: 0, page, page_size: pageSize, total_pages: 0,
   });
+}
+
+export interface FormFacet { form_type: string; count: number; }
+
+export function ex10Facets(): Promise<{ forms: FormFacet[] }> {
+  return getJson<{ forms: FormFacet[] }>(`/api/facets`, { forms: [] });
 }
 
 export async function ex10Since(seconds = 60): Promise<{ window_seconds: number; count: number; items: Ex10Summary[] }> {
