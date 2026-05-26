@@ -16,11 +16,11 @@
   "kv_namespaces": [
     { "binding": "SESSION", "id": "f3559549c63e48cf8af7500331ceb1cf" }
   ],
-  // Non-secret config. SEC_API_URL must point at the PRIVATE FastAPI origin
-  // reached over a Cloudflare Tunnel — replace before relying on the live feed.
+  // The backend API runs as a Hugging Face Space (key-gated). The Worker fetches
+  // it at request time and caches at the edge (CDN + stale-while-revalidate).
   // SEC_API_KEY is a secret: `wrangler secret put SEC_API_KEY`.
   "vars": {
-    "SEC_API_URL": "https://sec-api.internal.example.com"
+    "SEC_API_URL": "https://arthrod-sec-ex10-api.hf.space"
   },
   "observability": { "enabled": true }
 }

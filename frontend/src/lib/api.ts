@@ -79,6 +79,22 @@ export interface Stats {
   by_form_type: Record<string, number>;
 }
 
+export interface SearchResult extends PageResult {
+  query: string;
+}
+
+export function ex10Search(query: string, page = 1, pageSize = 20): Promise<SearchResult> {
+  const q = encodeURIComponent(query);
+  return getJson<SearchResult>(`/api/search?q=${q}&page=${page}&page_size=${pageSize}`, {
+    query,
+    items: [],
+    total: 0,
+    page,
+    page_size: pageSize,
+    total_pages: 0,
+  });
+}
+
 export function ex10Stats(): Promise<Stats> {
   return getJson<Stats>('/api/stats', {
     total: 0,

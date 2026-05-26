@@ -11,7 +11,7 @@ cp -r backend/sec_listener "$DEST/sec_listener"
 find "$DEST/sec_listener" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 
 # Lean, consistent seed: ex10_exhibits (+markdown) + seen_accessions, VACUUMed.
-python - <<'PY'
+${PYTHON:-python3} - <<'PY'
 import sqlite3
 src = sqlite3.connect("ex10_listener.db")
 dst = sqlite3.connect("deploy/hf-space/seed.db")

@@ -1,26 +1,23 @@
 ---
 import Base from '../../layouts/Base.astro';
-import { listAllEx10, ex10Detail } from '../../lib/api';
-import type { GetStaticPaths } from 'astro';
+import { getLiveEntry } from 'astro:content';
+import type { Ex10Detail } from '../../lib/api';
 import { marked } from 'marked';
 
-// Prerendered detail pages: full markdown rendered to HTML and indexed by Pagefind.
-export const prerender = true;
-
-export const getStaticPaths = (async () => {
-  const all = await listAllEx10();
-  return all.map((item) => ({ params: { id: String(item.id) } }));
-}) satisfies GetStaticPaths;
-
+// Live SSR via Live Content Collections: fetched at request time by id. No
+// prerender, no rebuild — every agreement is available the moment it's stored.
 const { id } = Astro.params;
-const detail = await ex10Detail(id!);
+const { entry, error } = await getLiveEntry('agreements', { id: id! });
 
-if (!detail) {
+if (error || !entry) {
   return Astro.redirect('/404');
 }
 
+const detail = entry.data as Ex10Detail;
 const html = detail.markdown ? marked.parse(detail.markdown) : '';
 const title = detail.description?.trim() || `${detail.doc_type} — ${detail.filename}`;
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 ---
 <Base title={title} description={`EX-10 material contract: ${title}`}>
   <section class="hero">
@@ -30,14 +27,14 @@ const title = detail.description?.trim() || `${detail.doc_type} — ${detail.fil
       <span class="badge">CIK {detail.cik}</span>
       <span class="badge">{detail.accession}</span>
     </div>
-    <h1 data-pagefind-meta="title">{title}</h1>
+    <h1>{title}</h1>
     <p>
       <a href={detail.filing_url} rel="noopener" target="_blank">View original filing on SEC EDGAR →</a>
       &nbsp;·&nbsp; seen {detail.found_at} UTC
     </p>
   </section>
 
-  <article class="prose" data-pagefind-body>
+  <article class="prose">
     {html ? <Fragment set:html={html} /> : <p class="empty">Markdown for this exhibit is still being generated.</p>}
   </article>
 

@@ -92,3 +92,9 @@ footer.site { border-top: 1px solid var(--border); color: var(--muted); font-siz
 
 .stats-strip { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-top: 0.9rem; font-family: var(--mono); font-size: 0.82rem; color: var(--muted); }
 .stats-strip strong { color: var(--accent); font-size: 0.95rem; }
+
+.search-form { display: flex; gap: 0.5rem; margin-top: 1rem; max-width: 640px; }
+.search-form input { flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 0.6rem 0.8rem; font-size: 0.95rem; }
+.search-form input:focus { outline: none; border-color: var(--accent); }
+.search-form button { background: var(--accent); color: #04203f; border: none; border-radius: 8px; padding: 0 1.1rem; font-weight: 700; cursor: pointer; }
+.search-meta { color: var(--muted); font-family: var(--mono); font-size: 0.85rem; margin: 0.5rem 0 1rem; }
