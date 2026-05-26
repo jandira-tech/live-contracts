@@ -210,10 +210,14 @@ def test_insert_exhibits_bulk_maps_empty_to_null(db):
     db.insert_exhibits_bulk([
         {"accession": "r1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1", "filename": "r.htm",
          "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 10:00:00",
-         "markdown": "", "markdown_status": "", "filing_metadata": ""},
+         "markdown": "", "markdown_status": "", "filing_metadata": "", "image_urls": ""},
     ])
     assert [r["accession"] for r in db.exhibits_missing_markdown(limit=10)] == ["r1"]  # "" -> NULL -> pending
-    assert db.recent_ex10()[0]["filing_metadata"] is None
+    row = db.recent_ex10()[0]
+    assert row["filing_metadata"] is None
+    assert row["image_urls"] is None  # "" -> NULL so exhibits_pending_images still selects it
+
+
 def test_image_urls_column_update_and_pending(db):
     import json
     db.save_ex10_exhibit(

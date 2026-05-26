@@ -211,7 +211,9 @@ class Database:
                 """SELECT id, accession, cik, markdown FROM ex10_exhibits
                    WHERE image_urls IS NULL AND markdown_status = 'done'
                      AND (markdown LIKE '%.jpg%' OR markdown LIKE '%.jpeg%'
-                          OR markdown LIKE '%.png%' OR markdown LIKE '%.gif%')
+                          OR markdown LIKE '%.png%' OR markdown LIKE '%.gif%'
+                          OR markdown LIKE '%.tif%' OR markdown LIKE '%.tiff%'
+                          OR markdown LIKE '%.svg%' OR markdown LIKE '%.webp%')
                    ORDER BY found_at DESC, id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()

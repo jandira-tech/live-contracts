@@ -164,22 +164,36 @@ def test_backfill_images_captures_only_image_only_rows(db):
     _add_done(db, "scan", "(scan_001.jpg) (scan_002.jpg)")        # image-only
     _add_done(db, "text", "Real agreement text (logo.jpg) more terms")  # has text
 
-    worker = BackfillWorker(
-        db, image_token="tok", sleep_fn=lambda _ : None,
-        image_capture_fn=lambda a, c: ["https://hf/x/scan_001.jpg", "https://hf/x/scan_002.jpg"],
-    )
+    seen_only = {}
+
+    def cap(a, c, only):  # capture receives THIS exhibit's filenames
+        seen_only[a] = only
+        return ["https://hf/x/scan_001.jpg", "https://hf/x/scan_002.jpg"]
+
+    worker = BackfillWorker(db, image_token="tok", sleep_fn=lambda _: None, image_capture_fn=cap)
     captured = worker.backfill_images_batch(limit=10)
     assert captured == 1  # only the image-only row
+    assert seen_only["scan"] == {"scan_001.jpg", "scan_002.jpg"}  # scoped to this exhibit
     rows = {r["accession"]: r for r in db.recent_ex10()}
     assert json.loads(rows["scan"]["image_urls"]) == ["https://hf/x/scan_001.jpg", "https://hf/x/scan_002.jpg"]
     assert json.loads(rows["text"]["image_urls"]) == []  # checked, not image-only
     assert db.exhibits_pending_images(limit=10) == []  # nothing left to process
 
 
+def test_backfill_images_empty_capture_stays_pending(db):
+    """A capture that returns nothing (transient/failure) must NOT be marked — it retries."""
+    _add_done(db, "scan", "(scan_001.jpg)")
+    worker = BackfillWorker(db, image_token="tok", sleep_fn=lambda _: None,
+                            image_capture_fn=lambda a, c, only: [])
+    assert worker.backfill_images_batch(limit=10) == 0
+    assert [r["accession"] for r in db.exhibits_pending_images(limit=10)] == ["scan"]  # still pending
+
+
 def test_backfill_images_noop_without_token(db):
     _add_done(db, "scan", "(scan_001.jpg)")
     called = []
-    worker = BackfillWorker(db, image_token=None, image_capture_fn=lambda a, c: called.append("x") or [])
+    worker = BackfillWorker(db, image_token=None,
+                            image_capture_fn=lambda a, c, only: called.append("x") or [])
     assert worker.backfill_images_batch(limit=10) == 0
     assert called == []
     assert len(db.exhibits_pending_images(limit=10)) == 1  # untouched -> captured later when token set

@@ -90,18 +90,24 @@ def capture_images(
     *,
     token: str | None,
     repo: str = DATASET_REPO,
+    only: set[str] | None = None,
     fetcher: Callable[[str, str], list[tuple[str, bytes]]] = fetch_graphics,
     uploader: Callable[[list[tuple[bytes, str]], str, str], None] = upload_images,
 ) -> list[str]:
-    """Fetch a filing's images, store them in the dataset (one commit), return URLs.
+    """Fetch THIS exhibit's images, store them in the dataset (one commit), return URLs.
 
-    No-op (returns []) without a token. Network failures are logged and swallowed
-    so a transient SEC/HF hiccup never crashes the caller.
+    A filing's GRAPHIC documents can belong to several exhibits; ``only`` (the
+    filenames referenced by this exhibit's markdown) restricts capture to them so
+    unrelated logos/other-exhibit pages aren't shown. No-op (returns []) without a
+    token. Network failures are logged and swallowed so a hiccup never crashes the
+    caller.
     """
     if not token:
         return []
     try:
         graphics = fetcher(accession, cik)
+        if only is not None:
+            graphics = [(f, d) for f, d in graphics if f in only]
         if not graphics:
             return []
         uploads: list[tuple[bytes, str]] = []

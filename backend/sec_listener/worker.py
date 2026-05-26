@@ -116,7 +116,7 @@ class BackfillWorker:
         if not self.image_token:
             return 0
         from .api import clean_excerpt
-        from .images import is_image_only
+        from .images import image_filenames, is_image_only
 
         rows = self.db.exhibits_pending_images(limit=limit)
         captured = 0
@@ -124,24 +124,25 @@ class BackfillWorker:
             if not is_image_only(row["markdown"], clean_excerpt_fn=clean_excerpt):
                 self.db.update_image_urls(row["id"], [])  # checked, not image-only
                 continue
-            if self.request_delay:
+            if self.request_delay > 0:
                 self._sleep(self.request_delay)  # respect SEC's 10 req/s cap
+            only = set(image_filenames(row["markdown"]))  # only THIS exhibit's images
             try:
-                urls = self._capture_images(row["accession"], row["cik"])
+                urls = self._capture_images(row["accession"], row["cik"], only)
             except Exception as exc:  # noqa: BLE001 - isolate each row
                 logger.warning("image capture failed for %s: %s", row["accession"], exc)
-                self.db.update_image_urls(row["id"], [])  # mark checked; don't loop forever
-                continue
-            self.db.update_image_urls(row["id"], urls)
+                continue  # leave image_urls NULL -> retried next cycle, not marked permanently
             if urls:
+                self.db.update_image_urls(row["id"], urls)
                 captured += 1
+            # else: nothing captured (transient/none) -> leave NULL so it retries
         return captured
 
     # --- live fetch ---------------------------------------------------------
-    def _datamule_capture_images(self, accession: str, cik: str) -> list[str]:
+    def _datamule_capture_images(self, accession: str, cik: str, only: set[str] | None = None) -> list[str]:
         from .images import capture_images
 
-        return capture_images(accession, cik, token=self.image_token, repo=self.image_repo)
+        return capture_images(accession, cik, token=self.image_token, repo=self.image_repo, only=only)
 
     def _datamule_metadata_fetcher(self, accession: str, cik: str) -> dict:
         from datamule import Submission, format_accession
