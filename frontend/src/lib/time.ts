@@ -15,6 +15,28 @@ export function formatYmd(ymd: string | null | undefined): string {
   }).format(d);
 }
 
+/**
+ * Format an SEC acceptance datetime ("YYYYMMDDHHMMSS", already Eastern Time) as
+ * "May 26, 2026, 16:16 ET". This is the actual filing acceptance time.
+ */
+export function formatFiledAt(s: string | null | undefined): string {
+  if (typeof s !== 'string' || !/^\d{14}$/.test(s)) return '';
+  const d = new Date(
+    `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T${s.slice(8, 10)}:${s.slice(10, 12)}:${s.slice(12, 14)}Z`,
+  );
+  if (Number.isNaN(d.getTime())) return '';
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC', // value is already ET wall-clock; don't shift it
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23', // standard 24h; avoids platform "24:00" for midnight
+  }).format(d);
+  return `${fmt} ET`;
+}
+
 export function formatNY(utc: string | null | undefined): string {
   if (!utc) return '';
   const norm = utc.includes('T') ? utc : utc.replace(' ', 'T');
