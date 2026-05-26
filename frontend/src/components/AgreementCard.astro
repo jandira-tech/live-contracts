@@ -1,11 +1,12 @@
 ---
 import type { Ex10Summary } from '../lib/api';
-import { formatNY } from '../lib/time';
+import { formatNY, formatYmd } from '../lib/time';
 
 interface Props { item: Ex10Summary; }
 const { item } = Astro.props;
 
 const title = item.description?.trim() || `${item.doc_type} — ${item.filename}`;
+const period = formatYmd(item.period);
 ---
 <a class="card" href={`/agreement/${item.id}`}>
   <div class="meta">
@@ -16,5 +17,10 @@ const title = item.description?.trim() || `${item.doc_type} — ${item.filename}
   </div>
   <h3>{title}</h3>
   {item.excerpt ? <p class="excerpt">{item.excerpt}</p> : null}
+  <div class="cardfoot">
+    {item.company_name ? <span class="filer">🏢 {item.company_name}</span> : null}
+    {period ? <span>📅 period {period}</span> : null}
+    {item.location ? <span>📍 {item.location}</span> : null}
+  </div>
   <div class="time">filed/seen {formatNY(item.found_at)}</div>
 </a>

@@ -68,7 +68,16 @@ header.site nav { display: flex; gap: 1.1rem; font-size: 0.92rem; }
 .badge.form { color: var(--warn); }
 .card h3 { margin: 0 0 0.4rem; font-size: 1rem; line-height: 1.35; }
 .card .excerpt { color: var(--muted); font-size: 0.88rem; margin: 0; }
-.card .time { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); margin-top: 0.6rem; }
+.card .cardfoot { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; margin-top: 0.7rem; font-size: 0.76rem; color: var(--muted); }
+.card .cardfoot .filer { color: #c7d3e2; font-weight: 600; }
+.card .time { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); margin-top: 0.45rem; }
+
+.filing-details { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; margin-bottom: 1.1rem; }
+.filing-details h2 { margin: 0 0 0.6rem; font-size: 0.95rem; color: var(--accent-2); font-family: var(--mono); letter-spacing: 0.02em; }
+.filing-details dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; margin: 0; font-size: 0.88rem; }
+.filing-details dt { color: var(--muted); font-family: var(--mono); font-size: 0.78rem; }
+.filing-details dd { margin: 0; color: #d4deeb; }
+.filing-details .items { margin: 0.4rem 0 0; padding-left: 1.1rem; color: #d4deeb; font-size: 0.85rem; }
 
 .empty { color: var(--muted); padding: 2rem 0; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
 

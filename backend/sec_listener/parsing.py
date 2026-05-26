@@ -65,6 +65,55 @@ def parse_rss_feed(rss_content: str) -> list[dict]:
     return filings
 
 
+def extract_filing_header(content: dict | None) -> dict:
+    """Pull a compact filing header from datamule's parsed submission metadata.
+
+    Input is ``Submission.metadata.content`` (datamule already parses the SGML
+    <SEC-HEADER> for us — we just select a few useful fields). Never raises;
+    always returns the full key set with empty defaults for missing data.
+    """
+    header = {
+        "company_name": "",
+        "cik": "",
+        "sic": "",
+        "state_of_incorporation": "",
+        "period": "",
+        "filing_date": "",
+        "file_number": "",
+        "location": "",
+        "items": [],
+    }
+    if not content:
+        return header
+
+    filer = content.get("filer")
+    if isinstance(filer, list):
+        filer = filer[0] if filer else {}
+    filer = filer or {}
+    company = filer.get("company-data") or {}
+    values = filer.get("filing-values") or {}
+    addr = filer.get("business-address") or {}
+
+    header["company_name"] = company.get("conformed-name", "") or ""
+    header["cik"] = company.get("cik", "") or ""
+    header["sic"] = company.get("assigned-sic", "") or ""
+    header["state_of_incorporation"] = company.get("state-of-incorporation", "") or ""
+    header["file_number"] = values.get("file-number", "") or ""
+    header["period"] = content.get("period", "") or ""
+    header["filing_date"] = content.get("filing-date", "") or ""
+
+    city, state = addr.get("city", ""), addr.get("state", "")
+    header["location"] = ", ".join(p for p in (city, state) if p)
+
+    items = content.get("item-information")
+    if isinstance(items, str):
+        header["items"] = [items]
+    elif isinstance(items, list):
+        header["items"] = list(items)
+
+    return header
+
+
 def classify_documents(documents: list[dict]) -> tuple[list[dict], list[dict]]:
     """Split documents into (traditional EX-10, other EX-* exhibits).
 

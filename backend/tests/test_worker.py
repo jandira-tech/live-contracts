@@ -59,6 +59,39 @@ def test_empty_content_marked_empty_and_not_retried(db):
     assert db.exhibits_missing_markdown(limit=10) == []
 
 
+def test_metadata_backfill_fills_missing(db):
+    _add(db, "fm-1")
+    _add(db, "fm-2")
+    assert len(db.exhibits_missing_filing_metadata(limit=10)) == 2
+
+    def meta_fetcher(accession, cik):
+        return {"company_name": f"Co {accession}", "period": "20260519", "items": []}
+
+    worker = BackfillWorker(db, metadata_fetcher=meta_fetcher)
+    n = worker.backfill_metadata_batch(limit=10)
+    assert n == 2
+    assert db.exhibits_missing_filing_metadata(limit=10) == []
+    import json
+    rows = db.recent_ex10()
+    assert all(json.loads(r["filing_metadata"])["company_name"].startswith("Co ") for r in rows)
+
+
+def test_metadata_backfill_error_is_isolated(db):
+    _add(db, "ok-meta")
+    _add(db, "bad-meta")
+
+    def meta_fetcher(accession, cik):
+        if accession == "bad-meta":
+            raise RuntimeError("404")
+        return {"company_name": "Good"}
+
+    worker = BackfillWorker(db, metadata_fetcher=meta_fetcher)
+    n = worker.backfill_metadata_batch(limit=10)
+    assert n == 1  # only the good one counted
+    # bad one is marked (empty) so it is not retried forever
+    assert db.exhibits_missing_filing_metadata(limit=10) == []
+
+
 def test_fetch_error_marked_error_and_isolated(db):
     _add(db, "ok-1")
     _add(db, "bad-1")

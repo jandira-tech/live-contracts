@@ -33,10 +33,13 @@ def _as_text(content) -> str:
 
 
 class BackfillWorker:
-    def __init__(self, db: Database, *, fetcher=None, convert_fn=convert_html_to_markdown):
+    def __init__(self, db: Database, *, fetcher=None, convert_fn=convert_html_to_markdown,
+                 metadata_fetcher=None):
         self.db = db
         # fetcher(accession, cik, filename) -> raw document content (str/bytes) or ""
         self.fetcher = fetcher or self._datamule_fetcher
+        # metadata_fetcher(accession, cik) -> compact filing header dict
+        self.metadata_fetcher = metadata_fetcher or self._datamule_metadata_fetcher
         self.convert_fn = convert_fn
 
     def backfill_batch(self, limit: int = 25) -> int:
@@ -70,7 +73,34 @@ class BackfillWorker:
                 self.db.update_markdown(row["id"], "", status="empty")
         return converted
 
+    def backfill_metadata_batch(self, limit: int = 25) -> int:
+        """Fill the filing-header metadata for up to ``limit`` exhibits missing it."""
+        rows = self.db.exhibits_missing_filing_metadata(limit=limit)
+        filled = 0
+        for row in rows:
+            try:
+                meta = self.metadata_fetcher(row["accession"], row["cik"])
+            except Exception as exc:  # noqa: BLE001 - isolate each row
+                logger.warning("metadata fetch failed for %s: %s", row["accession"], exc)
+                # Store empty so we don't re-hammer a broken filing forever.
+                self.db.update_filing_metadata(row["id"], {})
+                continue
+            self.db.update_filing_metadata(row["id"], meta or {})
+            if meta:
+                filled += 1
+        return filled
+
     # --- live fetch ---------------------------------------------------------
+    def _datamule_metadata_fetcher(self, accession: str, cik: str) -> dict:
+        from datamule import Submission, format_accession
+
+        from .parsing import extract_filing_header
+
+        formatted = format_accession(accession.replace("-", ""), "dash")
+        url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{formatted}.txt"
+        sub = Submission(url=url)
+        return extract_filing_header(sub.metadata.content)
+
     def _datamule_fetcher(self, accession: str, cik: str, filename: str) -> str:
         from datamule import Submission, format_accession
 
@@ -94,6 +124,9 @@ class BackfillWorker:
                 n = await asyncio.to_thread(self.backfill_batch, batch)
                 if n:
                     logger.info("Backfilled %d exhibits to markdown", n)
+                m = await asyncio.to_thread(self.backfill_metadata_batch, batch)
+                if m:
+                    logger.info("Backfilled %d exhibits with filing metadata", m)
                 # If we did a full batch there is likely more; loop quickly but
                 # respect SEC rate limits. Otherwise idle longer.
                 await asyncio.sleep(interval if n < batch else max(1.0, batch / rps))
