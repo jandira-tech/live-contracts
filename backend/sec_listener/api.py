@@ -115,26 +115,38 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
 
 
 _MD_MARKERS = re.compile(r"\*+|_{2,}|`+|#+|>+|\[|\]|!\[")
+# Image references markitdown emits for scanned exhibits, e.g.
+# `(ex10-3_001.jpg)` or `(exhibit101facilityagreem001.jpg "slide1")`.
+_IMG_REF = re.compile(r"\([^()]*\.(?:jpe?g|png|gif|svg|webp)(?:\s+\"[^\"]*\")?[^()]*\)", re.I)
+# Exhibit labels — pure metadata, not contract content: "Exhibit 10.1", "EX-10.3".
+_EXHIBIT_LABEL = re.compile(r"(?i)\b(?:exhibit|ex)[\s.\-]*\d+(?:\.\d+)?\b")
 
 
 def clean_excerpt(text: str | None, limit: int = 280) -> str:
-    """Turn raw markdown into a clean one-line preview.
+    """Turn raw exhibit markdown into a clean preview.
 
-    Strips emphasis/heading/table markers and pipes, collapses whitespace, and
-    truncates on a word boundary with an ellipsis. Keeps card previews readable
-    instead of showing ``| | | --- |`` table noise.
+    Drops scanned-image references and "Exhibit 10.x" labels (metadata, not
+    contract text), strips markdown/table markers, and collapses whitespace
+    while **preserving single line breaks** (blank-line runs become one break)
+    so previews read as text instead of a grumbled run-on. Truncates on a word
+    or line boundary with an ellipsis.
     """
     if not text:
         return ""
     s = text.replace("|", " ")
+    s = _IMG_REF.sub(" ", s)
+    s = _EXHIBIT_LABEL.sub(" ", s)
     s = _MD_MARKERS.sub("", s)
     s = re.sub(r"-{2,}", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"[ \t]+", " ", s)              # collapse horizontal whitespace
+    s = re.sub(r"[ \t]*\n[ \t]*", "\n", s)     # trim around newlines
+    s = re.sub(r"\n{2,}", "\n", s).strip()     # blank-line runs -> single break
     if len(s) <= limit:
         return s
     cut = s[:limit]
-    if " " in cut:
-        cut = cut[: cut.rfind(" ")]
+    boundary = max(cut.rfind(" "), cut.rfind("\n"))
+    if boundary > 0:
+        cut = cut[:boundary]
     return cut.rstrip() + "…"
 
 

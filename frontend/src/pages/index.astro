@@ -21,20 +21,14 @@ const stats = await ex10Stats();
       <span>refreshing every {WINDOW}s</span>
       <span class="sep">·</span>
       <span class="countdown">next in <span id="cd" data-window={WINDOW}>{WINDOW}</span>s</span>
+      <span class="sep">·</span>
+      <span><strong>{stats.total.toLocaleString()}</strong> total agreements</span>
+      <span class="sep">·</span>
+      <span><strong>{stats.last_24h.toLocaleString()}</strong> last 24h</span>
     </div>
     <h1>New material contract exhibits, the moment they hit SEC EDGAR.</h1>
-    <p class="lede">
-      Traditional EX-10 material contracts — credit agreements, employment terms, license deals,
-      indemnification forms — extracted from public SEC filings in near real time. No login, no paywall.
-    </p>
     <hr class="divider" />
   </header>
-
-  <div class="sl-stats">
-    <div><span class="num">{stats.total.toLocaleString()}</span><span class="label">Total agreements</span></div>
-    <div><span class="num">{stats.last_24h.toLocaleString()}</span><span class="label">Filed in last 24h</span></div>
-    <div><span class="num">{stats.with_markdown.toLocaleString()}</span><span class="label">With markdown extract</span></div>
-  </div>
 
   <div class="sl-section-bar">
     <span class="title">New agreements</span>
