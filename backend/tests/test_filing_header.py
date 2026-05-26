@@ -107,3 +107,11 @@ def test_extract_filing_header_tolerates_non_dict_nested():
     assert out["period"] == "20260519"
     # filer itself as a bare string must also be tolerated
     assert extract_filing_header({"filer": "nope"})["company_name"] == ""
+
+
+def test_extract_filing_header_tolerates_non_dict_content():
+    """content itself may parse as a non-dict (list/str) on severely malformed SGML."""
+    from sec_listener.parsing import extract_filing_header
+    assert extract_filing_header([1, 2])["company_name"] == ""
+    assert extract_filing_header("garbage")["items"] == []
+    assert extract_filing_header(42)["period"] == ""

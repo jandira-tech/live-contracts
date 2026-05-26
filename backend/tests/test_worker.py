@@ -123,5 +123,20 @@ def test_metadata_backfill_throttles_between_requests(db):
     )
     worker.backfill_metadata_batch(limit=10)
     # one throttle per row, at the configured delay
-    assert slept == [worker.metadata_request_delay, worker.metadata_request_delay]
+    assert slept == [worker.request_delay, worker.request_delay]
     assert all(d > 0 for d in slept)
+
+
+def test_markdown_backfill_throttles_between_requests(db):
+    """The markdown backfill loop also fetches sec.gov per row and must throttle (SEC 10 RPS)."""
+    _add(db, "mb-1")
+    _add(db, "mb-2")
+    slept: list[float] = []
+    worker = BackfillWorker(
+        db,
+        fetcher=lambda a, c, f: "<p>doc</p>",
+        convert_fn=lambda t: "md",
+        sleep_fn=slept.append,
+    )
+    worker.backfill_batch(limit=10)
+    assert slept == [worker.request_delay, worker.request_delay]

@@ -83,11 +83,12 @@ def extract_filing_header(content: dict | None) -> dict:
         "location": "",
         "items": [],
     }
-    if not content:
+    # Malformed SGML can parse `content` itself — or any nested section — as a
+    # non-dict (str/list/number); guard every level so a single bad filing never
+    # raises into the listener loop.
+    if not isinstance(content, dict):
         return header
 
-    # Malformed SGML can parse any of these sections as a non-dict (str/list/number);
-    # guard every level so a single bad filing never raises into the listener loop.
     filer = content.get("filer")
     if isinstance(filer, list):
         filer = filer[0] if filer else {}

@@ -60,9 +60,10 @@ const stats = await ex10Stats();
     const el = document.getElementById('cd');
     if (el) {
       const target = Date.now() + (Number(el.dataset.window) || 60) * 1000;
-      setInterval(() => {
+      const id = setInterval(() => {
         const remaining = Math.max(0, Math.ceil((target - Date.now()) / 1000));
         el.textContent = String(remaining).padStart(2, '0');
+        if (remaining === 0) clearInterval(id);  // stop once the page is due to refresh
       }, 1000);
     }
   </script>

@@ -36,17 +36,17 @@ def _as_text(content) -> str:
 
 class BackfillWorker:
     def __init__(self, db: Database, *, fetcher=None, convert_fn=convert_html_to_markdown,
-                 metadata_fetcher=None, metadata_request_delay: float = 0.12, sleep_fn=time.sleep):
+                 metadata_fetcher=None, request_delay: float = 0.12, sleep_fn=time.sleep):
         self.db = db
         # fetcher(accession, cik, filename) -> raw document content (str/bytes) or ""
         self.fetcher = fetcher or self._datamule_fetcher
         # metadata_fetcher(accession, cik) -> compact filing header dict
         self.metadata_fetcher = metadata_fetcher or self._datamule_metadata_fetcher
         self.convert_fn = convert_fn
-        # Per-request throttle for the metadata backfill loop: SEC caps clients at
-        # 10 req/s, and a full batch fires that many sec.gov fetches back-to-back.
-        # Injectable so tests don't actually sleep.
-        self.metadata_request_delay = metadata_request_delay
+        # Per-request throttle for BOTH backfill loops (markdown + metadata): SEC
+        # caps clients at 10 req/s and a full batch fires that many sec.gov fetches
+        # back-to-back. Injectable so tests don't actually sleep.
+        self.request_delay = request_delay
         self._sleep = sleep_fn
 
     def backfill_batch(self, limit: int = 25) -> int:
@@ -54,6 +54,8 @@ class BackfillWorker:
         rows = self.db.exhibits_missing_markdown(limit=limit)
         converted = 0
         for row in rows:
+            if self.request_delay:
+                self._sleep(self.request_delay)  # respect SEC's 10 req/s cap
             try:
                 content = self.fetcher(row["accession"], row["cik"], row["filename"])
             except Exception as exc:  # noqa: BLE001 - isolate each row
@@ -85,8 +87,8 @@ class BackfillWorker:
         rows = self.db.exhibits_missing_filing_metadata(limit=limit)
         filled = 0
         for row in rows:
-            if self.metadata_request_delay:
-                self._sleep(self.metadata_request_delay)  # respect SEC's 10 req/s cap
+            if self.request_delay:
+                self._sleep(self.request_delay)  # respect SEC's 10 req/s cap
             try:
                 meta = self.metadata_fetcher(row["accession"], row["cik"])
             except Exception as exc:  # noqa: BLE001 - isolate each row
