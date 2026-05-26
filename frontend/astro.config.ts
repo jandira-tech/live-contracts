@@ -6,7 +6,7 @@ import cloudflare from '@astrojs/cloudflare';
 // Workers; the CDN caches responses (Cache-Control + stale-while-revalidate set
 // per-route and at the API origin).
 export default defineConfig({
-  site: 'https://contracts-live.arthur.law',
+  site: 'https://live-contracts.arthur.law',
   output: 'server',
   adapter: cloudflare({
     imageService: 'passthrough',

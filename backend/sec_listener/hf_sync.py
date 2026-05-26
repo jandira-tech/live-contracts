@@ -26,7 +26,8 @@ PATH_IN_REPO = "data/exhibits.parquet"
 # Columns mirrored from ex10_exhibits (full markdown included; parquet compresses).
 _COLUMNS = [
     "id", "accession", "cik", "form_type", "doc_type", "filename", "description",
-    "sequence", "filing_url", "found_at", "markdown_status", "filing_metadata", "markdown",
+    "sequence", "filing_url", "found_at", "markdown_status", "filing_metadata",
+    "image_urls", "markdown",
 ]
 _STR_FIELDS = [c for c in _COLUMNS if c not in ("id", "markdown")]
 
@@ -78,6 +79,49 @@ def upload_parquet(path: str, repo: str, token: str, path_in_repo: str = PATH_IN
         repo_type="dataset",
         commit_message="sync ex10_exhibits snapshot",
     )
+
+
+def read_parquet_records(path: str) -> list[dict[str, Any]]:
+    """Read a Parquet snapshot into a list of row dicts (pyarrow)."""
+    import pyarrow.parquet as pq
+
+    return pq.read_table(path).to_pylist()
+
+
+def _download_parquet(repo: str, token: str, path_in_repo: str = PATH_IN_REPO) -> str:
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(repo_id=repo, repo_type="dataset", filename=path_in_repo, token=token)
+
+
+def restore_from_dataset(
+    db,
+    repo: str = DATASET_REPO,
+    *,
+    token: str | None = None,
+    downloader: Callable[[str, str], str] = _download_parquet,
+    reader: Callable[[str], list[dict[str, Any]]] = read_parquet_records,
+) -> int:
+    """Seed/refresh SQLite from the dataset snapshot — the durable source of truth.
+
+    Loads the dataset's Parquet into SQLite only when it has MORE rows than the
+    local DB (so a fresh container reseeded from the frozen seed.db catches up to
+    the accumulated history). No-op without a token; never raises into boot.
+    """
+    if not token:
+        return 0
+    try:
+        records = reader(downloader(repo, token))
+    except Exception as exc:  # noqa: BLE001 - boot must proceed even if the Hub is down
+        logger.warning("dataset restore skipped (fetch/read failed): %s", exc)
+        return 0
+    have = db.count_ex10()
+    if len(records) <= have:
+        logger.info("dataset restore skipped: dataset=%d rows, local=%d", len(records), have)
+        return 0
+    loaded = db.insert_exhibits_bulk(records)
+    logger.info("dataset restore: loaded %d rows from %s (local now %d)", loaded, repo, db.count_ex10())
+    return loaded
 
 
 def sync_exhibits(
