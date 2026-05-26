@@ -129,8 +129,10 @@ async def _run_all(config: Config):
         except (NotImplementedError, RuntimeError):
             pass
 
-    await stop.wait() if config.run_duration_hours == 0 else asyncio.sleep(0)
-    # When the listener finishes (duration) or a signal arrives, wind down.
+    if config.run_duration_hours == 0:
+        # Run until a signal arrives.
+        await stop.wait()
+    # When the listener finishes (duration reached) or a signal arrives, wind down.
     await asyncio.gather(tasks[0], return_exceptions=True)
     tasks[1].cancel()
     await asyncio.gather(tasks[1], return_exceptions=True)

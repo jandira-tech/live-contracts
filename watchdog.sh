@@ -8,7 +8,9 @@ LOG_FILE="sec-listener.log"
 PID_FILE="sec-listener.pid"
 VENV_PYTHON=".venv/bin/python"
 # The worker supervises BOTH the listener loop and the markdown backfill loop.
-PROC_PATTERN="sec_listener.worker"
+# Match the actual launch line (python -m ...), not the bare module string, so
+# unrelated shell command lines that merely mention the module don't false-match.
+PROC_PATTERN="python -m sec_listener.worker"
 
 # Hardened listener runs as a module; config via env (defaults in config.py).
 export SEC_RUN_HOURS="${SEC_RUN_HOURS:-0}"          # 0 = run until stopped; watchdog supervises
@@ -33,7 +35,8 @@ fi
 
 # Not running - restart it
 echo "[$(date)] SEC listener NOT running. Restarting..." >> watchdog.log
-nohup "$VENV_PYTHON" -m sec_listener.worker >> "$LOG_FILE" 2>&1 &
+# setsid fully detaches into its own session so it survives the launching shell.
+setsid nohup "$VENV_PYTHON" -m sec_listener.worker >> "$LOG_FILE" 2>&1 < /dev/null &
 NEW_PID=$!
 echo "$NEW_PID" > "$PID_FILE"
 sleep 3
