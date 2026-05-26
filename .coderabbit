@@ -1,0 +1,505 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Audited & upgraded against schema.v2.json (fetched 2026-05-24).
+# Comments mark: [FIX] = bug in prior config, [NEW] = newly enabled for quality,
+# [DECIDE] = a policy choice you should confirm.
+# Schema defaults are NOT restated unless changed.
+
+early_access: true
+inheritance: true
+
+# [NEW] The schema lists these as top-level "required" keys. CodeRabbit does
+# not actually enforce that (your prior config omitted them and still ran),
+# but stating them explicitly silences strict validators and documents intent.
+tone_instructions: ''
+enable_free_tier: true
+
+# [NEW] PT-BR for a Brazil/US bilingual context; review prose still parses EN.
+# Drop this line if you want reviews to stay en-US.
+language: en-US
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  # [FIX] 'Cr' was reused for summary placeholder, title placeholder, AND the
+  # auto_review description_keyword. Disambiguated below.
+  high_level_summary_placeholder: '@coderabbitai summary'
+  auto_title_placeholder: '@coderabbitai'
+
+  review_details: true
+  fail_commit_status: true
+
+  # [FIX] Both entries were identically named 'Feat2' — one shadowed the other.
+  # Renamed to two distinct labels. Adjust to your real label taxonomy.
+  labeling_instructions:
+    - label: needs-best-practices
+      instructions: >-
+        Apply when the PR works but is missing items required for
+        best-practices status (tests, type coverage, docs, lint cleanliness).
+    - label: best-practices-ready
+      instructions: >-
+        Apply when the PR meets best-practices status: tests present and
+        passing, full type annotations, docstrings, zero lint suppressions
+        without justification.
+  auto_apply_labels: true
+  auto_assign_reviewers: true
+
+  path_filters:
+    - '!*.md'
+    - '!.Claude/**'
+    - '!.claude/**'
+    - '!.cursor/**'
+
+  path_instructions:
+    - path: '**/*.py,**/*.ts,**/*.tsx,**/*.js'
+      # [FIX] Corrected typos that were fed to the reviewer verbatim:
+      #   "are ever rendered" -> "are never rendered" (this had INVERTED the
+      #   dead-route check), "broad.picture I formation" -> "broad-picture
+      #   information", "solutions solutions" -> "solutions".
+      instructions: >-
+        Add docstrings, remove deprecated libraries (no unittest or mock),
+        remove typing Optional, List, etc in favor of modern syntax list,
+        str | None, use async methods as much as possible, when applicable
+        import and implement uvloop, typer, loguru, uv, ruff, pytest, assert,
+        httpx/aiohttp, polars. Add uv shebangs when possible:
+        #!/usr/bin/env -S uv run
+        # /// script
+        # requires-python = ">=3.12"
+        # dependencies = ["loguru"]
+        # ///
+        Refactor variables, classes, functions or constants names if not
+        descriptive enough. Don't forget to determine where else it's used.
+
+        For JavaScript and TypeScript, favor bun/oxlint/biome/tanstack/elysia,
+        but propose refactoring only if (1) a seamless migration to these tools
+        is possible and/or (2) the current implementation of the code is not
+        working. Always ensure authentication is properly implemented via
+        oauth2 or oidc. Always check for contrast and visualization for both
+        light and dark themes. Verify we do not have dead routes (pages that
+        are never rendered). Always review the comments of other commenters and
+        assess them meticulously, indicating for each what was correct and what
+        was incorrect. Verify any mock, incomplete, or — most importantly —
+        deceiving-looking incomplete implementations. Generally, focus on
+        correct, non-duplicative endpoints, completeness and robustness.
+
+        All of your messages, whether a response, a summary, or an automatic
+        review, MUST include, in addition to the other requirements, the
+        following:
+
+        1. An explanation of the goal of the repo and a meticulous explanation
+        of the goal of the PR.
+
+        2. How the PR attempts to achieve EACH of these goals.
+
+        3. Extremely comprehensively, indicate what the PR does well, what is
+        missing, and what is wrong. This section should have several subtopics,
+        but each subtopic must be very short, no more than a sentence
+        [subtopicx, subtopicy, subtopicz, etc] that will be my punch list (and
+        must be in list format).
+
+        4. Then propose marginal enhancements and full solutions, focusing on
+        what is most critical for achieving the PR's goals first, the repo's
+        goals second, robustness third, and safety fourth. Add code snippets,
+        always ensuring you have enough broad-picture information.
+
+        5. After all that, if truthful, you will assert: "vim aqui saltitar e
+        tagarelar, porque não há o que lhe perguntar, nem mais nada para
+        consertar! Gemini como sempre faz tudo errado, mas soy un conejo que
+        não enche o saco!"
+
+  auto_review:
+    # [FIX] description_keyword: 'Cr' was INERT — it only takes effect when
+    # auto_review.enabled is false, but enabled defaults to true. Removed.
+    auto_pause_after_reviewed_commits: 20
+    drafts: true
+    # [DECIDE] '.*' reviews PRs into EVERY branch (kept from your prior config).
+    # For a default-branch-only policy, delete the two lines below.
+    base_branches:
+      - .*
+    ignore_usernames:
+      - bot
+
+  finishing_touches:
+    # [NEW] docstring + unit-test recipes (on by default, pinned here explicitly).
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+    simplify:
+      enabled: true
+    custom:
+      - enabled: true
+        name: Deduplicate
+        instructions: >-
+          Identify duplicated logic, constants, types, or endpoints introduced
+          in this PR and consolidate them into a single source of truth.
+      - enabled: true
+        name: Type mania
+        instructions: >-
+          Add explicit type annotations everywhere they are missing. Python:
+          modern native syntax (list, dict, str | None). TypeScript: explicit
+          return types on all public functions, no implicit any.
+      - enabled: true
+        name: Test mania
+        instructions: >-
+          Add tests for changed code AND for the prior behavior path. Follow
+          transport-layer mocking; never patch library methods directly.
+
+  pre_merge_checks:
+    # [NEW] These four built-in checks were not configured before.
+    docstrings:
+      mode: warning
+      threshold: 80
+    title:
+      mode: warning
+      # [NEW] enforce a conventional-commit-style title.
+      requirements: >-
+        Title must follow Conventional Commits (feat:, fix:, chore:, refactor:,
+        test:, docs:, etc.), be concise, and describe the change — not the
+        ticket number alone.
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+
+    custom_checks:
+      # [FIX] Every custom check below had a corrupted opening line (heading
+      # fragments like "**1. Name:**" / "`build-bundle-deps`. Name:**") pasted
+      # into the instruction body. Removed. Logic preserved verbatim.
+      #
+      # [DECIDE] mode: tdd-coverage-gate + type-safety set to 'error' (BLOCK
+      # merge). The other three stay 'warning'. Flip modes to suit your policy.
+      - mode: error
+        name: tdd-coverage-gate
+        instructions: >-
+          Verify that every changed production file has corresponding test
+          changes or new tests, and that coverage thresholds are met.
+
+
+          STEP 1 — Identify changed production files
+            Run: git diff --name-only --diff-filter=ACMR origin/main -- '*.py' '*.ts' '*.tsx' ':!*test*' ':!*spec*' ':!*__mocks__*'
+            Output: CHANGED_PROD_FILES
+
+          STEP 2 — Identify changed/added test files
+            Run: git diff --name-only --diff-filter=ACMR origin/main -- '*test*' '*spec*'
+            Output: CHANGED_TEST_FILES
+
+          STEP 3 — Mapping check
+            For each file in CHANGED_PROD_FILES, check that at least one corresponding test file exists in CHANGED_TEST_FILES OR already exists in the repo with assertions covering the changed symbols.
+            FAIL if a changed production file has zero associated test file AND the diff introduces new exported functions, classes, or public methods.
+            Exception: config files, type declaration files (.d.ts), migrations, and generated code are exempt.
+
+          STEP 4 — Python coverage
+            If Python files changed:
+              Run: uv run pytest --cov=<src_package> --cov-report=term-missing --cov-branch --cov-fail-under=80 -q
+              FAIL if exit code != 0.
+              FAIL if branch coverage < 70%.
+              Record line coverage and branch coverage in output.
+
+          STEP 5 — TypeScript coverage
+            If TypeScript files changed:
+              Run: bun run vitest run --coverage --coverage.thresholds.lines=80 --coverage.thresholds.branches=70
+              FAIL if exit code != 0.
+              Record line coverage and branch coverage in output.
+
+          STEP 6 — New test quality spot-check
+            For each new test file, verify it contains at least one assertion (assert, expect, assertEqual, toBe, toEqual, toThrow, rejects, or similar).
+            FAIL if any new test file has zero assertions (empty test shells are not acceptable).
+
+          PASS condition: Steps 3-6 all pass. Report coverage numbers in summary.
+
+      - mode: warning
+        name: regression-suite
+        instructions: >-
+          Run the full test suite for both runtimes and confirm zero
+          regressions against the base branch.
+
+
+          STEP 1 — Baseline snapshot
+            Checkout origin/main in a temporary worktree or use cached CI results.
+            Run the full test suite for each runtime present in the repo:
+              Python: uv run pytest --tb=line -q 2>&1 | tail -1  -> capture PASS_COUNT_BASE, FAIL_COUNT_BASE
+              TypeScript: bun run vitest run --reporter=json 2>&1 -> capture testResults summary
+
+          STEP 2 — PR branch full suite
+            Python: uv run pytest --tb=short -q
+              FAIL immediately if exit code != 0. Capture failing test names as FAILURES_PR.
+            TypeScript: bun run vitest run --reporter=verbose
+              FAIL immediately if exit code != 0. Capture failing test names as FAILURES_PR.
+
+          STEP 3 — Regression identification
+            Compare FAILURES_PR against FAIL_COUNT_BASE.
+            A regression is any test that passed on origin/main but fails on the PR branch.
+            FAIL if regressions > 0. List each regressed test by fully qualified name.
+
+          STEP 4 — Test count guard
+            Compare total test count on PR branch vs origin/main.
+            WARN (non-blocking) if total test count decreased. This flags deleted tests for reviewer attention.
+            FAIL if total test count decreased AND coverage also decreased (from check 1 values). Deleting tests while reducing coverage is not permitted.
+
+          STEP 5 — Flake detection
+            If any test failed in STEP 2, rerun only the failures up to 2 times:
+              Python: uv run pytest --lf --count=2
+              TypeScript: bun run vitest run --retry=2 (only failed specs)
+            If a test passes on rerun, flag it as FLAKY in the report but do not count it as a regression.
+            If flaky tests > 3, FAIL — flake debt is unacceptable.
+
+          PASS condition: Zero regressions, no impermissible test deletion, flaky count <= 3.
+
+      - mode: error
+        name: type-safety
+        instructions: >-
+          Enforce strict type checking across both runtimes with zero errors.
+
+
+          STEP 1 — Python type check
+            If any .py files exist in the diff or the project has a py.typed marker:
+              Run: uv run ty check
+              FAIL if exit code != 0.
+              Capture error count and list each error with file:line:message.
+            Fallback: if ty is not in the project dependencies, check for mypy or pyright in pyproject.toml and run the configured checker instead. If none is configured, FAIL with message "No Python type checker configured. Add ty to dev dependencies."
+
+          STEP 2 — TypeScript type check
+            If any .ts/.tsx files exist in the diff:
+              Run: bun run tsc --noEmit --pretty
+              FAIL if exit code != 0.
+              Capture error count and list each error with file:line:message.
+
+          STEP 3 — Strict null/undefined audit
+            For TypeScript, scan the diff for new occurrences of:
+              - Non-null assertions (!) that are not in test files
+              - @ts-ignore or @ts-expect-error without a trailing explanation comment
+              - 'as any' casts
+            WARN for each occurrence. FAIL if combined count > 5 in a single PR.
+            For Python, scan the diff for new occurrences of:
+              - 'type: ignore' without an error code (bare ignores)
+              - cast() calls without a comment explaining why
+            WARN for each. FAIL if bare 'type: ignore' count > 3.
+
+          STEP 4 — Exported API surface check
+            For changed files that are public module entry points (index.ts, __init__.py, or files listed in package.json exports / pyproject.toml [tool.setuptools.packages]):
+              Verify all exported symbols have explicit type annotations (no inferred return types on public functions).
+              Python: functions must have return type annotation and all parameters annotated.
+              TypeScript: functions must have explicit return type (no implicit any via inference on public API).
+            FAIL if any new public export lacks explicit types.
+
+          PASS condition: Steps 1-4 all pass (warnings are reported but non-blocking unless thresholds exceeded).
+
+      - mode: warning
+        name: lint-format-compliance
+        instructions: >-
+          Enforce zero lint violations and consistent formatting with the
+          project's configured toolchain.
+
+
+          STEP 1 — Python lint (ruff)
+            If Python files changed:
+              Run: uv run ruff check . --diff
+              FAIL if exit code != 0. List each violation.
+              Run: uv run ruff format --check --diff .
+              FAIL if exit code != 0. List each unformatted file.
+
+          STEP 2 — TypeScript lint (biome + oxlint)
+            If TypeScript files changed:
+              Run: bun run biome check --error-on-warnings .
+              FAIL if exit code != 0. List each violation.
+              Run: bun run oxlint .
+              FAIL if exit code != 0. List each violation.
+            Note: if biome.json or .oxlintrc.json is not present, FAIL with "Linter config missing."
+
+          STEP 3 — No lint suppression creep
+            Scan the diff for newly added suppression comments:
+              Python: # noqa, # type: ignore
+              TypeScript: // biome-ignore, // eslint-disable, @ts-ignore, @ts-expect-error, // oxlint-ignore
+            Each suppression MUST have an inline justification comment (text after the directive).
+            FAIL if any new suppression lacks justification.
+            WARN if total new suppressions > 3 in a single PR.
+
+          STEP 4 — Import ordering and dead imports
+            Python:
+              Run: uv run ruff check --select I,F401 .
+              FAIL if violations found (unused imports or misordered imports).
+            TypeScript:
+              Run: bun run biome check --formatter-enabled=false --linter-enabled=false --organize-imports-enabled=true .
+              FAIL if exit code != 0.
+
+          STEP 5 — Consistent config
+            Verify that linter/formatter config files (ruff.toml / pyproject.toml [tool.ruff], biome.json, .oxlintrc.json) were not modified in the PR without a corresponding entry in the PR description explaining why.
+            WARN (non-blocking) if config changed without PR description mention.
+
+          PASS condition: Steps 1-4 pass. Step 5 is advisory.
+
+      - mode: warning
+        name: build-bundle-deps
+        instructions: >-
+          Verify clean builds, dependency integrity, and that the final
+          artifact is shippable.
+
+
+          STEP 1 — Lockfile consistency
+            Python: Run: uv lock --check
+              FAIL if lockfile is out of sync with pyproject.toml.
+            TypeScript: Run: bun install --frozen-lockfile
+              FAIL if lockfile is out of sync with package.json.
+            If both runtimes exist, both must pass.
+
+          STEP 2 — Dependency audit
+            Python: Run: uv run pip-audit (if pip-audit is a dev dep) OR uv run pip list --outdated (advisory)
+              FAIL if any known CVE with severity HIGH or CRITICAL is found.
+            TypeScript: Run: bun audit (or npm audit --omit=dev if bun audit unavailable)
+              FAIL if any known CVE with severity high or critical is found.
+            Note: WARN for moderate severity. Do not fail on moderate unless the advisory specifically affects a production dependency.
+
+          STEP 3 — Clean build
+            Python (if applicable — e.g., package build):
+              Run: uv build
+              FAIL if exit code != 0. Verify the dist/ output contains expected wheel/sdist.
+            TypeScript:
+              Run: bun run build
+              FAIL if exit code != 0.
+              Verify output directory (dist/, .next/, build/, or as configured) is non-empty.
+              Scan build output/stderr for warnings. WARN if > 10 build warnings.
+
+          STEP 4 — Bundle analysis (TypeScript)
+            If the project produces a client-side bundle:
+              Compare bundle size of PR branch vs origin/main.
+              WARN if total bundle size increased by > 5%.
+              FAIL if total bundle size increased by > 15% without an explanation in the PR description.
+            If no bundle analysis tool is configured, skip with advisory: "No bundle size tracking configured."
+
+          STEP 5 — Smoke test
+            Python web server: Start the server, wait for ready signal, hit GET /health or GET /, assert HTTP 200, shut down. Timeout: 30s.
+            Python CLI: Run <cli> --help, assert exit code 0.
+            Python library: Run: python -c "import <package>" assert exit code 0.
+            TypeScript web app: Run: bun run preview or bun run start in background, curl http://localhost:<port>/, assert HTTP 200, kill. Timeout: 30s.
+            TypeScript library: Run: bun -e "require('.') || import('.')" assert exit code 0.
+            FAIL if the smoke test fails. Skip only if the project type cannot be determined, and state why.
+
+          STEP 6 — Cloudflare Workers compatibility (if applicable)
+            If wrangler.toml or wrangler.json exists:
+              Run: bun run wrangler deploy --dry-run
+              FAIL if exit code != 0. This catches Node.js API usage, unsupported modules, and bundle size limits before they hit production.
+
+          PASS condition: Steps 1-3 and 5 pass. Steps 4 and 6 are conditional. Step 2 moderate-severity warnings are advisory.
+
+  tools:
+    # [FIX] languagetool.enabled_rules was [python, typescript, rust] — those
+    # are NOT LanguageTool rule IDs (LanguageTool checks prose, not code), so
+    # the block was inert. The actual code linters below are what you wanted;
+    # they are on by default and pinned here for clarity.
+    ruff:
+      enabled: true
+    biome:
+      enabled: true
+    oxc:
+      enabled: true
+    # [NEW] Security & secret scanning — all default-on, pinned explicitly.
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    semgrep:
+      enabled: true
+    osvScanner:
+      enabled: true
+    # [NEW] PII detection — directly relevant to LGPD/GLiNER work. Default OFF.
+    presidio:
+      enabled: true
+    # [NEW] CI / IaC / config hygiene — default-on, pinned.
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    yamllint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    languagetool:
+      level: picky
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  # [NEW] Make your agent rule files double as review criteria.
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - '**/CLAUDE.md'
+      - '**/AGENTS.md'
+      - '**/AGENT.md'
+      - '.github/copilot-instructions.md'
+      - '**/.cursor/rules/*'
+  web_search:
+    enabled: true
+  learnings:
+    scope: local
+  issues:
+    scope: local
+  pull_requests:
+    scope: local
+
+code_generation:
+  docstrings:
+    # [NEW] Make CodeRabbit-generated docstrings match your house style.
+    path_instructions:
+      - path: '**/*.py'
+        instructions: >-
+          Google-style docstrings. State Args, Returns, Raises. Use modern
+          native typing in signatures (list, dict, str | None). Be terse and
+          factual; no restating the function name.
+      - path: '**/*.{ts,tsx}'
+        instructions: >-
+          TSDoc-style. Document @param and @returns. Keep explicit return
+          types; do not rely on inference for public API.
+  unit_tests:
+    path_instructions:
+      # [FIX] glob was '**/*.py,**/*.tsx,**/*.ts,**/**/*.js,**/**/*.py,...'
+      # with multiple exact duplicates (**/*.py == **/**/*.py). Deduped.
+      - path: '**/*.{py,ts,tsx,js,cjs,mjs}'
+        instructions: >-
+          Dependency isolation strategy. Follow this priority order:
+
+          1. Prefer deterministic production code. Structure logic as pure
+          functions where possible — pure functions need no mocking.
+
+          2. Pull test utilities from the dependency itself. Before writing any
+          mock or fake, examine how the dependency tests itself. Reuse the
+          fixtures, transport layers, response builders, and Pydantic/Zod
+          models the library already provides.
+
+          3. Use fakes over generic mocks. For non-deterministic dependencies
+          (databases, network, filesystem, clocks), prefer lightweight
+          in-memory fakes implementing the same interface.
+
+          4. Use unittest.mock / vi.mock only as last resort. Mock only what is
+          necessary.
+
+          5. NEVER use real non-deterministic dependencies in unit tests.
+
+          httpx: use httpx.MockTransport (built in) or respx / pytest-httpx.
+          NEVER patch httpx.get / httpx.post.
+
+          OpenAI SDK (v1.x+): mock at the httpx transport layer using respx or
+          httpx.MockTransport. Construct responses with the SDK's own Pydantic
+          models (ChatCompletion, Choice, ChatCompletionMessage,
+          CompletionUsage). Avoid patching Completions.create directly.
+
+          SQLAlchemy: use in-memory SQLite (sqlite://) as a fake engine.
+
+          All test runs MUST produce coverage reports. Target >=80% line /
+          >=70% branch baseline.
+
+issue_enrichment:
+  # [NEW] Whole section was absent. auto_enrich defaults to OFF — turning it on
+  # makes CodeRabbit annotate new issues with related code, candidate
+  # solutions, and a complexity estimate.
+  auto_enrich:
+    enabled: true
+  planning:
+    enabled: true
+    auto_planning:
+      enabled: true
