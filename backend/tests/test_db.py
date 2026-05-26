@@ -185,3 +185,20 @@ def test_missing_filing_metadata_robust_to_filed_at_substring(db):
     )
     accs = {m["accession"] for m in db.exhibits_missing_filing_metadata(limit=10)}
     assert "tricky" in accs  # still needs backfill (json key absent)
+
+
+def test_insert_exhibits_bulk_inserts_and_ignores_dups(db):
+    recs = [
+        {"accession": "b-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1", "filename": "a.htm",
+         "description": "D", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 10:00:00",
+         "markdown": "body", "markdown_status": "done", "filing_metadata": '{"filed_at":"x"}'},
+        {"accession": "b-2", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.2", "filename": "b.htm",
+         "description": "", "sequence": "2", "filing_url": "u", "found_at": "2026-05-26 11:00:00",
+         "markdown": "", "markdown_status": "empty", "filing_metadata": None},
+    ]
+    assert db.insert_exhibits_bulk(recs) == 2
+    assert db.count_ex10() == 2
+    assert db.insert_exhibits_bulk(recs) == 0  # idempotent — UNIQUE(accession,doc_type,filename)
+    rows = {r["accession"]: r for r in db.recent_ex10()}
+    assert rows["b-1"]["found_at"] == "2026-05-26 10:00:00"  # preserved, not now()
+    assert rows["b-1"]["markdown_status"] == "done"

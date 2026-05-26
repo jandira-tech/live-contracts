@@ -190,6 +190,31 @@ class Database:
             )
             conn.commit()
 
+    def insert_exhibits_bulk(self, records: list[dict[str, Any]]) -> int:
+        """Load exhibit rows (e.g. restored from the HF dataset) preserving found_at.
+
+        INSERT OR IGNORE on UNIQUE(accession, doc_type, filename) so it merges with
+        existing rows idempotently. Returns the number actually inserted.
+        """
+        inserted = 0
+        with self.connect() as conn:
+            for r in records:
+                cur = conn.execute(
+                    """INSERT OR IGNORE INTO ex10_exhibits
+                       (accession, cik, form_type, doc_type, filename, description, sequence,
+                        filing_url, found_at, markdown, markdown_status, filing_metadata)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        r.get("accession"), r.get("cik"), r.get("form_type"), r.get("doc_type"),
+                        r.get("filename"), r.get("description"), r.get("sequence"),
+                        r.get("filing_url"), r.get("found_at"), r.get("markdown") or "",
+                        r.get("markdown_status"), r.get("filing_metadata"),
+                    ),
+                )
+                inserted += cur.rowcount
+            conn.commit()
+        return inserted
+
     # --- reads --------------------------------------------------------------
     # List/search payloads only need a short excerpt, so we truncate the markdown
     # column in SQL (SUBSTR) instead of loading multi-MB contract bodies into
