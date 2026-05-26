@@ -5,7 +5,8 @@
    never textual. Sharp corners only (--radius: 0).
    ========================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* Manrope + JetBrains Mono are loaded via <link rel="preconnect"> + stylesheet
+   in Base.astro (avoids the render-blocking @import waterfall). */
 
 /* Departure Mono — self-hosted from /public/fonts. */
 @font-face {
@@ -131,6 +132,10 @@ header.site nav { display: flex; gap: 1.4rem; font-size: 0.78rem; font-weight: 5
 .prose { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem 1.75rem; }
 .prose :is(h1,h2,h3) { letter-spacing: -0.01em; color: var(--text); }
 .prose p, .prose li { color: var(--text); }
+/* Links inside rendered markdown must be distinguishable from body text (WCAG 1.4.1),
+   since the global `a` rule strips underlines. */
+.prose a { text-decoration: underline; text-decoration-color: var(--text-secondary); text-underline-offset: 3px; }
+.prose a:hover { text-decoration-color: var(--text); }
 .prose table { border-collapse: collapse; width: 100%; }
 .prose td, .prose th { border: 1px solid var(--border); padding: 0.4rem 0.6rem; }
 
@@ -143,6 +148,6 @@ footer.site { border-top: 1px solid var(--border); color: var(--text-secondary);
 
 .search-form { display: flex; gap: 0.5rem; margin-top: 1rem; max-width: 640px; }
 .search-form input { flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius); padding: 0.6rem 0.8rem; font-size: 0.95rem; font-family: var(--font-body); }
-.search-form input:focus { outline: none; border-color: var(--text); }
+.search-form input:focus { outline: none; border-color: var(--text); box-shadow: 0 0 0 1px var(--text); }
 .search-form button { background: var(--accent); color: var(--text); border: none; border-radius: var(--radius); padding: 0 1.1rem; font-weight: 700; cursor: pointer; font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
 .search-meta { color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.82rem; margin: 0.5rem 0 1rem; }
