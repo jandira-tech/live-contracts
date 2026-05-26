@@ -30,10 +30,10 @@ Local dev: put both in `.env`.
 ## Develop / deploy
 
 ```bash
-pnpm install
-pnpm dev                 # http://localhost:4321
-pnpm build               # fast — only /404 is static; everything else is SSR
-pnpm test:smoke          # BASE=<url> node test/smoke.mjs
+bun install
+bun run dev              # http://localhost:4321
+bun run build            # fast — only /404 is static; everything else is SSR
+bun run test:smoke       # BASE=<url> node test/smoke.mjs
 wrangler deploy          # deploy code changes (content needs no redeploy)
 ```
 
