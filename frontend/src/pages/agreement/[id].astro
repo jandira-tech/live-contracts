@@ -23,19 +23,22 @@ const hasFiling = Boolean(f.company_name || f.period || f.file_number || (f.item
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 ---
 <Base title={title} description={`EX-10 material contract: ${title}`}>
-  <section class="hero">
-    <div class="meta" style="display:flex;gap:.5rem;flex-wrap:wrap;font-family:var(--mono);font-size:.78rem;color:var(--muted);margin-bottom:.5rem">
-      <span class="badge ex10">{detail.doc_type}</span>
-      <span class="badge form">{detail.form_type}</span>
-      <span class="badge">CIK {detail.cik}</span>
-      <span class="badge">{detail.accession}</span>
+  <header class="sl-hero">
+    <div class="sl-hero-eyebrow">
+      <span class="sl-ex-tag">{detail.doc_type}</span>
+      <span>{detail.form_type}</span>
+      <span class="sep">·</span>
+      <span>CIK {detail.cik}</span>
+      <span class="sep">·</span>
+      <span>{detail.accession}</span>
     </div>
     <h1>{title}</h1>
-    <p>
+    <p class="lede">
       <a href={detail.filing_url} rel="noopener" target="_blank">View original filing on SEC EDGAR →</a>
       &nbsp;·&nbsp; seen {formatNY(detail.found_at)}
     </p>
-  </section>
+    <hr class="divider" />
+  </header>
 
   {hasFiling && (
     <section class="filing-details">
@@ -61,5 +64,5 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-re
     {html ? <Fragment set:html={html} /> : <p class="empty">Markdown for this exhibit is still being generated.</p>}
   </article>
 
-  <div class="pagination"><a href="/agreements/1">← Back to all agreements</a></div>
+  <a class="sl-tail-link" href="/agreements/1">← Back to all agreements</a>
 </Base>
