@@ -1,16 +1,10 @@
 # SEC EX-10 backend as a Hugging Face Docker Space.
-# Runs the unified worker (SEC listener + markdown backfill + internal FastAPI)
-# and, when TUNNEL_TOKEN is set, a Cloudflare Tunnel exposing the API at a stable
-# Cloudflare hostname. The Astro frontend on Cloudflare points SEC_API_URL there.
+# Runs the unified worker (SEC listener + markdown backfill + internal FastAPI on
+# :7860). Hugging Face exposes it publicly at the Space URL; the Astro frontend on
+# Cloudflare points SEC_API_URL there and caches it at the edge (CDN + SWR).
+# NOTE: cloudflared/Cloudflare Tunnel is intentionally NOT used — Hugging Face's
+# abuse policy bans it on Spaces. HF already provides the public HTTPS endpoint.
 FROM python:3.13-slim
-
-# cloudflared (Cloudflare Tunnel daemon) + curl/ca-certs
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-    && curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
-         -o /usr/local/bin/cloudflared \
-    && chmod +x /usr/local/bin/cloudflared \
-    && apt-get purge -y curl && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
 
 # Non-root user (Hugging Face convention; uid 1000).
 RUN useradd -m -u 1000 user

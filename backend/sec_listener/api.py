@@ -72,6 +72,26 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
             "items": [_summary(i) for i in items],
         }
 
+    @app.get("/api/search", dependencies=[Depends(require_key)])
+    def search(
+        response: Response,
+        q: str = Query("", max_length=200),
+        page: int = Query(1, ge=1),
+        page_size: int = Query(20, ge=1, le=200),
+    ):
+        response.headers["Cache-Control"] = _LIST_CACHE
+        query = (q or "").strip()
+        if not query:
+            return {"query": "", "total": 0, "page": page, "page_size": page_size,
+                    "total_pages": 0, "items": []}
+        total = db.search_count(query)
+        total_pages = max(1, math.ceil(total / page_size)) if total else 0
+        items = db.search(query, limit=page_size, offset=(page - 1) * page_size)
+        return {
+            "query": query, "total": total, "page": page, "page_size": page_size,
+            "total_pages": total_pages, "items": [_summary(i) for i in items],
+        }
+
     @app.get("/api/stats", dependencies=[Depends(require_key)])
     def stats(response: Response):
         response.headers["Cache-Control"] = _LIST_CACHE

@@ -222,6 +222,33 @@ class Database:
             "by_form_type": {r[0]: r[1] for r in by_form},
         }
 
+    def search(self, query: str, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
+        """Case-insensitive substring search over description + markdown."""
+        q = (query or "").strip()
+        if not q:
+            return []
+        like = f"%{q}%"
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM ex10_exhibits
+                   WHERE description LIKE ? COLLATE NOCASE OR markdown LIKE ? COLLATE NOCASE
+                   ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
+                (like, like, limit, offset),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def search_count(self, query: str) -> int:
+        q = (query or "").strip()
+        if not q:
+            return 0
+        like = f"%{q}%"
+        with self.connect() as conn:
+            return conn.execute(
+                """SELECT COUNT(*) FROM ex10_exhibits
+                   WHERE description LIKE ? COLLATE NOCASE OR markdown LIKE ? COLLATE NOCASE""",
+                (like, like),
+            ).fetchone()[0]
+
     def exhibits_missing_markdown(self, limit: int = 100) -> list[dict[str, Any]]:
         """Rows awaiting markdown conversion.
 
