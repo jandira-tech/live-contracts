@@ -140,3 +140,13 @@ def test_markdown_backfill_throttles_between_requests(db):
     )
     worker.backfill_batch(limit=10)
     assert slept == [worker.request_delay, worker.request_delay]
+
+
+def test_negative_request_delay_does_not_sleep(db):
+    """A misconfigured negative delay must not reach time.sleep (would ValueError)."""
+    _add(db, "neg-1")
+    slept = []
+    worker = BackfillWorker(db, metadata_fetcher=lambda a, c: {"filed_at": "x"},
+                            request_delay=-1.0, sleep_fn=slept.append)
+    worker.backfill_metadata_batch(limit=10)
+    assert slept == []  # guarded by request_delay > 0

@@ -54,7 +54,7 @@ class BackfillWorker:
         rows = self.db.exhibits_missing_markdown(limit=limit)
         converted = 0
         for row in rows:
-            if self.request_delay:
+            if self.request_delay > 0:
                 self._sleep(self.request_delay)  # respect SEC's 10 req/s cap
             try:
                 content = self.fetcher(row["accession"], row["cik"], row["filename"])
@@ -87,7 +87,7 @@ class BackfillWorker:
         rows = self.db.exhibits_missing_filing_metadata(limit=limit)
         filled = 0
         for row in rows:
-            if self.request_delay:
+            if self.request_delay > 0:
                 self._sleep(self.request_delay)  # respect SEC's 10 req/s cap
             try:
                 meta = self.metadata_fetcher(row["accession"], row["cik"])
