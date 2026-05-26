@@ -63,30 +63,64 @@ a:hover { text-decoration: underline; text-decoration-color: var(--accent); text
 
 .container { max-width: var(--max-width); margin: 0 auto; padding: 0 1.25rem; }
 
-header.site {
+/* ---------- Nav (sticky, hairline, mono wordmark) ---------- */
+.sl-nav {
   border-bottom: 1px solid var(--border);
   background: var(--bg);
-  position: sticky; top: 0; z-index: 10;
+  position: sticky; top: 0; z-index: 20;
 }
-header.site .row { display: flex; align-items: center; justify-content: space-between; padding: 0.9rem 0; gap: 1rem; }
-header.site .brand { font-weight: 700; letter-spacing: -0.01em; font-size: 1.05rem; color: var(--text); }
-header.site .brand .tag { color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; }
-header.site nav { display: flex; gap: 1.4rem; font-size: 0.78rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
-
-.hero { padding: 2rem 0 1rem; }
-.hero h1 { font-size: 2rem; margin: 0 0 0.5rem; letter-spacing: -0.02em; font-weight: 400; color: var(--text); }
-.hero p { color: var(--text-secondary); margin: 0; }
-
-/* Live indicator — sharp yellow square, mono label. */
-.live-banner {
+.sl-nav-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0.95rem 1.25rem;
+  display: flex; align-items: center; justify-content: space-between; gap: 1.75rem;
+}
+.sl-wordmark {
+  font-family: var(--font-mono); font-size: 0.82rem; letter-spacing: 0.06em; line-height: 1;
+  display: inline-flex; align-items: center; gap: 0.6rem; color: var(--text);
+}
+.sl-wordmark:hover { text-decoration: none; }
+.sl-wordmark .dot { color: var(--text-secondary); }
+.sl-wordmark .tag {
+  font-size: 0.56rem; letter-spacing: 0.14em; color: var(--text-secondary);
+  border-left: 1px solid var(--border); padding-left: 0.6rem;
+}
+.sl-nav-links { display: flex; gap: 2rem; list-style: none; align-items: center; margin: 0; padding: 0; }
+.sl-nav-link {
+  font-family: var(--font-body); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--text); padding: 0.4rem 0; position: relative;
   display: inline-flex; align-items: center; gap: 0.5rem;
-  background: transparent; border: 1px solid var(--border);
-  color: var(--text-secondary); padding: 0.3rem 0.7rem; border-radius: var(--radius);
-  font-size: 0.72rem; font-family: var(--font-mono); letter-spacing: 0.12em;
-  text-transform: uppercase; margin-bottom: 1rem;
 }
-.live-dot { width: 8px; height: 8px; border-radius: 0; background: var(--accent); animation: pulse 1.6s infinite; }
+.sl-nav-link:hover { text-decoration: none; }
+.sl-nav-link::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px;
+  background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform var(--t-base);
+}
+.sl-nav-link:hover::after, .sl-nav-link.is-active::after { transform: scaleX(1); }
+.sl-nav-link .live-dot { width: 6px; height: 6px; border-radius: 0; background: var(--accent); animation: pulse 1.6s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+/* ---------- Hero / page header ---------- */
+.sl-hero { padding: 3rem 0 2rem; }
+.sl-hero-eyebrow {
+  display: flex; align-items: center; gap: 0.6rem; font-family: var(--font-mono);
+  font-size: 0.7rem; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--text-secondary); margin-bottom: 1.4rem;
+}
+.sl-hero-eyebrow .pulse { width: 8px; height: 8px; background: var(--accent); position: relative; flex: 0 0 auto; }
+.sl-hero-eyebrow .pulse::after {
+  content: ''; position: absolute; inset: -3px; background: var(--accent); opacity: 0.35;
+  animation: pulse-square 2s ease-out infinite;
+}
+@keyframes pulse-square { 0% { transform: scale(1); opacity: 0.4; } 100% { transform: scale(2.2); opacity: 0; } }
+.sl-hero-eyebrow .sep { color: var(--border); }
+.sl-hero-eyebrow .countdown { color: var(--text); font-variant-numeric: tabular-nums; }
+.sl-hero h1 {
+  font-family: var(--font-body); font-size: 2.1rem; font-weight: 400; letter-spacing: -0.02em;
+  line-height: 1.2; max-width: 760px; margin: 0 0 1.4rem; color: var(--text);
+}
+.sl-hero p.lede { font-size: 1rem; line-height: 1.6; color: var(--text-secondary); max-width: 620px; margin: 0; }
+.sl-hero hr.divider { height: var(--rule-yellow-h); width: var(--rule-yellow-w); background: var(--accent); border: 0; margin: 2.25rem 0 0; }
 
 .grid { display: grid; gap: 0.9rem; grid-template-columns: 1fr; }
 @media (min-width: 720px) { .grid { grid-template-columns: 1fr 1fr; } }
