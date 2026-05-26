@@ -13,16 +13,28 @@ const items: Ex10Summary[] = (entries ?? []).map((e) => e.data as Ex10Summary);
 const stats = await ex10Stats();
 ---
 <Base refreshSeconds={WINDOW}>
-  <section class="hero">
-    <div class="live-banner"><span class="live-dot"></span> LIVE · refreshing every {WINDOW}s</div>
-    <h1>New agreements in the last {WINDOW} seconds</h1>
-    <p>Traditional EX-10 material contract exhibits, the moment they hit SEC EDGAR.</p>
-    <div class="stats-strip">
-      <span><strong>{stats.total.toLocaleString()}</strong> total</span>
-      <span><strong>{stats.last_24h.toLocaleString()}</strong> in last 24h</span>
-      <span><strong>{stats.with_markdown.toLocaleString()}</strong> with markdown</span>
+  <header class="sl-hero">
+    <div class="sl-hero-eyebrow">
+      <span class="pulse"></span>
+      <span>LIVE</span>
+      <span class="sep">·</span>
+      <span>refreshing every {WINDOW}s</span>
+      <span class="sep">·</span>
+      <span class="countdown">next in <span id="cd" data-window={WINDOW}>{WINDOW}</span>s</span>
     </div>
-  </section>
+    <h1>New material contract exhibits, the moment they hit SEC EDGAR.</h1>
+    <p class="lede">
+      Traditional EX-10 material contracts — credit agreements, employment terms, license deals,
+      indemnification forms — extracted from public SEC filings in near real time. No login, no paywall.
+    </p>
+    <hr class="divider" />
+  </header>
+
+  <div class="stats-strip">
+    <span><strong>{stats.total.toLocaleString()}</strong> total</span>
+    <span><strong>{stats.last_24h.toLocaleString()}</strong> in last 24h</span>
+    <span><strong>{stats.with_markdown.toLocaleString()}</strong> with markdown</span>
+  </div>
 
   {error ? (
     <div class="empty">The live feed is temporarily unavailable. Retrying on next refresh…</div>
@@ -37,4 +49,16 @@ const stats = await ex10Stats();
   <div class="pagination">
     <a href="/agreements/1">Browse all agreements →</a>
   </div>
+
+  <script>
+    // Tick the hero countdown down to the next meta-refresh.
+    const el = document.getElementById('cd');
+    if (el) {
+      let n = Number(el.dataset.window) || 60;
+      setInterval(() => {
+        n = n > 0 ? n - 1 : 0;
+        el.textContent = String(n).padStart(2, '0');
+      }, 1000);
+    }
+  </script>
 </Base>

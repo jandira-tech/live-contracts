@@ -13,6 +13,12 @@ const {
   description = 'Real-time feed of EX-10 material contract exhibits filed with the SEC.',
   refreshSeconds,
 } = Astro.props;
+
+// Active nav state from the current path.
+const path = Astro.url.pathname;
+const isLive = path === '/';
+const isBrowse = path.startsWith('/agreement'); // /agreements/* and /agreement/*
+const isSearch = path.startsWith('/search');
 ---
 
 <!doctype html>
@@ -29,16 +35,16 @@ const {
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📄</text></svg>" />
   </head>
   <body>
-    <header class="site">
-      <div class="container row">
-        <div class="brand">SEC <span class="tag">EX-10</span> Live</div>
-        <nav>
-          <a href="/">Live</a>
-          <a href="/agreements/1">Browse</a>
-          <a href="/search">Search</a>
-        </nav>
+    <nav class="sl-nav">
+      <div class="sl-nav-inner">
+        <a class="sl-wordmark" href="/">SEC<span class="dot">·</span>CONTRACTSLIVE<span class="tag">EX-10 FEED</span></a>
+        <ul class="sl-nav-links">
+          <li><a class={`sl-nav-link${isLive ? ' is-active' : ''}`} href="/"><span class="live-dot"></span>LIVE</a></li>
+          <li><a class={`sl-nav-link${isBrowse ? ' is-active' : ''}`} href="/agreements/1">BROWSE</a></li>
+          <li><a class={`sl-nav-link${isSearch ? ' is-active' : ''}`} href="/search">SEARCH</a></li>
+        </ul>
       </div>
-    </header>
+    </nav>
     <main class="container">
       <slot />
     </main>
