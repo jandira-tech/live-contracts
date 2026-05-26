@@ -1,28 +1,54 @@
 ---
 import Base from '../layouts/Base.astro';
+import AgreementRow from '../components/AgreementRow.astro';
+import { ex10Search } from '../lib/api';
 
-// Pagefind search UI, loaded purely client-side from the index that
-// `astro build` (astro-pagefind integration) writes to /pagefind/. No SSR/node
-// dependency, so it prerenders cleanly on the Cloudflare adapter.
-export const prerender = true;
+// Live full-text search (replaces the build-time Pagefind index): queries the
+// API at request time, so results always cover the latest agreements.
+const url = new URL(Astro.request.url);
+const q = (url.searchParams.get('q') ?? '').trim();
+const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1);
+const PAGE_SIZE = 12;
+
+const result = q ? await ex10Search(q, page, PAGE_SIZE) : null;
+const lastPage = result ? Math.max(1, result.total_pages ?? 0) : 1;
+const prev = result && page > 1 ? page - 1 : null;
+const next = result && page < lastPage ? page + 1 : null;
+const qs = (p: number) => `/search?q=${encodeURIComponent(q)}&page=${p}`;
+
+Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
 ---
-<Base title="Search EX-10 agreements">
-  <section class="hero">
+<Base title={q ? `Search: ${q}` : 'Search EX-10 agreements'}>
+  <header class="sl-hero">
+    <div class="sl-hero-eyebrow"><span>SEARCH</span></div>
     <h1>Search agreements</h1>
-    <p>Full-text search across every indexed EX-10 material contract.</p>
-  </section>
-  <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
-  <div id="search"></div>
-  <script is:inline>
-    (function () {
-      function init() {
-        // eslint-disable-next-line no-undef
-        new PagefindUI({ element: '#search', showImages: false, showSubResults: true });
-      }
-      var s = document.createElement('script');
-      s.src = '/pagefind/pagefind-ui.js';
-      s.onload = init;
-      document.head.appendChild(s);
-    })();
-  </script>
+    <p class="lede">Live full-text search across every EX-10 material contract.</p>
+    <form method="get" action="/search" class="sl-search-row">
+      <input type="search" name="q" value={q} placeholder="Search agreements, parties, terms…" autofocus aria-label="Search" />
+      <button type="submit">Search</button>
+    </form>
+    <div class="sl-search-hint">Press enter to search · matches description &amp; full markdown text</div>
+  </header>
+
+  {result && (
+    <>
+      <div class="sl-results-bar">
+        <span class="count"><strong>{(result.total ?? 0).toLocaleString()}</strong> result{result.total === 1 ? '' : 's'} for “{q}”</span>
+      </div>
+      {result.items.length === 0 ? (
+        <div class="empty">No matches. Try a different term.</div>
+      ) : (
+        <section class="sl-feed">
+          {result.items.map((item) => <AgreementRow item={item} />)}
+        </section>
+      )}
+      {lastPage > 1 && (
+        <nav class="pagination" aria-label="Pagination">
+          {prev ? <a href={qs(prev)}>‹ Prev</a> : <span class="disabled">‹ Prev</span>}
+          <span class="current">{page} / {lastPage}</span>
+          {next ? <a href={qs(next)}>Next ›</a> : <span class="disabled">Next ›</span>}
+        </nav>
+      )}
+    </>
+  )}
 </Base>

@@ -1,0 +1,5 @@
+aiohttp
+datamule
+markitdown
+fastapi
+uvicorn[standard]
