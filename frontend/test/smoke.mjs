@@ -26,7 +26,8 @@ async function check(name, path, ...needles) {
 await check('homepage live banner', '/', 'last 60 seconds', 'LIVE');
 await check('archive pagination', '/agreements/1', 'All EX-10 agreements', 'class="pagination"');
 await check('detail markdown shell', '/agreement/103', 'class="prose"', 'View original filing');
-await check('search page', '/search', 'Search agreements', 'pagefind-ui.js');
+await check('search page form', '/search', 'Search agreements', 'class="search-form"');
+await check('search results', '/search?q=agreement', 'results for', 'class="card"');
 
 if (failures) {
   console.error(`\n${failures} smoke check(s) failed`);

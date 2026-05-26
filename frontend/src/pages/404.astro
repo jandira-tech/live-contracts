@@ -3,8 +3,10 @@ import Base from '../layouts/Base.astro';
 export const prerender = true;
 ---
 <Base title="Not found">
-  <section class="hero">
-    <h1>404 — not found</h1>
-    <p>That agreement isn’t here. <a href="/">Back to the live feed →</a></p>
-  </section>
+  <header class="sl-hero">
+    <div class="sl-hero-eyebrow"><span>ERROR</span><span class="sep">·</span><span>404</span></div>
+    <h1>Not found.</h1>
+    <p class="lede">That agreement isn’t here. <a href="/">Back to the live feed →</a></p>
+    <hr class="divider" />
+  </header>
 </Base>
