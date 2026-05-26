@@ -276,3 +276,42 @@ def test_filed_at_expression_index_created(db):
             "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_ex10_filed_at'"
         ).fetchone()
     assert row is not None and "filed_at" in row[0]
+def _bulk(db, *rows):
+    db.insert_exhibits_bulk([
+        {"accession": a, "cik": c, "form_type": ft, "doc_type": "EX-10.1", "filename": f"{a}.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": fa, "markdown": "x",
+         "markdown_status": "done", "filing_metadata": fm}
+        for (a, c, ft, fa, fm) in rows
+    ])
+
+
+def test_browse_filters_by_form_cik_and_filer(db):
+    _bulk(db,
+        ("a", "111", "8-K", "2026-05-26 10:00:00", '{"filed_at":"20260526100000","company_name":"Acme Corp"}'),
+        ("b", "222", "10-Q", "2026-05-26 11:00:00", '{"filed_at":"20260526110000","company_name":"Beta LLC"}'),
+        ("c", "111", "8-K", "2026-05-26 12:00:00", '{"filed_at":"20260526120000","company_name":"Acme Corp"}'),
+    )
+    assert {r["accession"] for r in db.recent_ex10(form="8-K")} == {"a", "c"}
+    assert {r["accession"] for r in db.recent_ex10(cik="222")} == {"b"}
+    assert {r["accession"] for r in db.recent_ex10(filer="acme")} == {"a", "c"}  # case-insensitive
+    assert db.count_ex10(form="8-K") == 2
+    assert db.count_ex10(cik="222") == 1
+
+
+def test_browse_sort_oldest_reverses(db):
+    _bulk(db,
+        ("old", "1", "8-K", "2026-05-26 10:00:00", '{"filed_at":"20260526100000"}'),
+        ("new", "1", "8-K", "2026-05-26 12:00:00", '{"filed_at":"20260526120000"}'),
+    )
+    assert [r["accession"] for r in db.recent_ex10()] == ["new", "old"]            # newest default
+    assert [r["accession"] for r in db.recent_ex10(oldest=True)] == ["old", "new"]  # oldest first
+
+
+def test_form_facets_counts(db):
+    _bulk(db,
+        ("a", "1", "8-K", "2026-05-26 10:00:00", "{}"),
+        ("b", "1", "8-K", "2026-05-26 11:00:00", "{}"),
+        ("c", "1", "10-Q", "2026-05-26 12:00:00", "{}"),
+    )
+    facets = dict((f["form_type"], f["count"]) for f in db.form_facets())
+    assert facets == {"8-K": 2, "10-Q": 1}

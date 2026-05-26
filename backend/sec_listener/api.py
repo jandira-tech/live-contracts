@@ -46,11 +46,16 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
         response: Response,
         page: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=200),
+        form: str | None = Query(None, max_length=40),
+        cik: str | None = Query(None, max_length=20),
+        filer: str | None = Query(None, max_length=120),
+        sort: str = Query("newest"),
     ):
-        total = db.count_ex10()
+        oldest = sort == "oldest"
+        total = db.count_ex10(form=form, cik=cik, filer=filer)
         total_pages = max(1, math.ceil(total / page_size)) if total else 0
         offset = (page - 1) * page_size
-        items = db.recent_ex10(limit=page_size, offset=offset)
+        items = db.recent_ex10(limit=page_size, offset=offset, form=form, cik=cik, filer=filer, oldest=oldest)
         response.headers["Cache-Control"] = _LIST_CACHE
         return {
             "items": [_summary(i) for i in items],
@@ -59,6 +64,11 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
             "page_size": page_size,
             "total_pages": total_pages,
         }
+
+    @app.get("/api/facets", dependencies=[Depends(require_key)])
+    def facets(response: Response):
+        response.headers["Cache-Control"] = _LIST_CACHE
+        return {"forms": db.form_facets()}
 
     @app.get("/api/ex10/since", dependencies=[Depends(require_key)])
     def ex10_since(

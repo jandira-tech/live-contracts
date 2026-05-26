@@ -268,19 +268,54 @@ class Database:
         "ORDER BY json_extract(filing_metadata, '$.filed_at') DESC NULLS LAST, "
         "found_at DESC, id DESC"
     )
+    _LIST_ORDER_ASC = (
+        "ORDER BY json_extract(filing_metadata, '$.filed_at') ASC NULLS LAST, "
+        "found_at ASC, id ASC"
+    )
 
-    def recent_ex10(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    @staticmethod
+    def _browse_where(form: str | None, cik: str | None, filer: str | None) -> tuple[str, list]:
+        clauses, params = [], []
+        if form:
+            clauses.append("form_type = ?")
+            params.append(form)
+        if cik:
+            clauses.append("cik = ?")
+            params.append(cik)
+        if filer:
+            clauses.append("json_extract(filing_metadata, '$.company_name') LIKE ? COLLATE NOCASE")
+            params.append(f"%{filer}%")
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        return where, params
+
+    def recent_ex10(self, limit: int = 50, offset: int = 0, *, form: str | None = None,
+                    cik: str | None = None, filer: str | None = None, oldest: bool = False) -> list[dict[str, Any]]:
+        where, params = self._browse_where(form, cik, filer)
+        order = self._LIST_ORDER_ASC if oldest else self._LIST_ORDER
         with self.connect() as conn:
             rows = conn.execute(
-                f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
-                    {self._LIST_ORDER} LIMIT ? OFFSET ?""",
-                (limit, offset),
+                f"SELECT {self._SUMMARY_COLS} FROM ex10_exhibits {where} {order} LIMIT ? OFFSET ?",
+                (*params, limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def count_ex10(self) -> int:
+    def count_ex10(self, *, form: str | None = None, cik: str | None = None,
+                   filer: str | None = None) -> int:
+        where, params = self._browse_where(form, cik, filer)
         with self.connect() as conn:
-            return conn.execute("SELECT COUNT(*) FROM ex10_exhibits").fetchone()[0]
+            return conn.execute(
+                f"SELECT COUNT(*) FROM ex10_exhibits {where}", params
+            ).fetchone()[0]
+
+    def form_facets(self) -> list[dict[str, Any]]:
+        """Form-type counts for the Browse filter sidebar, most common first."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT form_type, COUNT(*) AS count FROM ex10_exhibits
+                   WHERE form_type IS NOT NULL AND form_type <> ''
+                   GROUP BY form_type ORDER BY count DESC, form_type ASC"""
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def ex10_since(self, seconds: int) -> list[dict[str, Any]]:
         with self.connect() as conn:
