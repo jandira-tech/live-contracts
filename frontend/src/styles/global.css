@@ -1,0 +1,91 @@
+:root {
+  --bg: #0b0e14;
+  --panel: #131823;
+  --panel-2: #1a2230;
+  --border: #243044;
+  --text: #e6edf6;
+  --muted: #8b9bb4;
+  --accent: #4ea1ff;
+  --accent-2: #5ee0a0;
+  --warn: #ffb454;
+  --radius: 12px;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.container { max-width: 1080px; margin: 0 auto; padding: 0 1.25rem; }
+
+header.site {
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #0d121c, #0b0e14);
+  position: sticky; top: 0; z-index: 10;
+  backdrop-filter: blur(6px);
+}
+header.site .row { display: flex; align-items: center; justify-content: space-between; padding: 0.9rem 0; gap: 1rem; }
+header.site .brand { font-weight: 700; letter-spacing: -0.01em; font-size: 1.05rem; }
+header.site .brand .tag { color: var(--accent-2); font-family: var(--mono); }
+header.site nav { display: flex; gap: 1.1rem; font-size: 0.92rem; }
+
+.hero { padding: 2rem 0 1rem; }
+.hero h1 { font-size: 1.9rem; margin: 0 0 0.35rem; letter-spacing: -0.02em; }
+.hero p { color: var(--muted); margin: 0; }
+
+.live-banner {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  background: rgba(94, 224, 160, 0.1); border: 1px solid rgba(94, 224, 160, 0.3);
+  color: var(--accent-2); padding: 0.3rem 0.7rem; border-radius: 999px;
+  font-size: 0.82rem; font-family: var(--mono); margin-bottom: 1rem;
+}
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-2); animation: pulse 1.6s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.grid { display: grid; gap: 0.9rem; grid-template-columns: 1fr; }
+@media (min-width: 720px) { .grid { grid-template-columns: 1fr 1fr; } }
+
+.card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 1rem 1.1rem; transition: border-color 0.15s, transform 0.15s;
+}
+.card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.card .meta { display: flex; gap: 0.5rem; flex-wrap: wrap; font-size: 0.74rem; color: var(--muted); font-family: var(--mono); margin-bottom: 0.45rem; }
+.badge { background: var(--panel-2); border: 1px solid var(--border); padding: 0.1rem 0.45rem; border-radius: 6px; }
+.badge.ex10 { color: var(--accent); border-color: rgba(78,161,255,0.4); }
+.badge.form { color: var(--warn); }
+.card h3 { margin: 0 0 0.4rem; font-size: 1rem; line-height: 1.35; }
+.card .excerpt { color: var(--muted); font-size: 0.88rem; margin: 0; }
+.card .time { font-family: var(--mono); font-size: 0.74rem; color: var(--muted); margin-top: 0.6rem; }
+
+.empty { color: var(--muted); padding: 2rem 0; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
+
+.pagination { display: flex; gap: 0.5rem; align-items: center; justify-content: center; margin: 1.6rem 0; flex-wrap: wrap; }
+.pagination a, .pagination span {
+  font-family: var(--mono); font-size: 0.85rem; padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+}
+.pagination .current { background: var(--accent); color: #04203f; border-color: var(--accent); font-weight: 700; }
+.pagination .disabled { opacity: 0.4; pointer-events: none; }
+
+.prose { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem 1.75rem; }
+.prose :is(h1,h2,h3) { letter-spacing: -0.01em; }
+.prose p, .prose li { color: #d4deeb; }
+.prose table { border-collapse: collapse; width: 100%; }
+.prose td, .prose th { border: 1px solid var(--border); padding: 0.4rem 0.6rem; }
+
+footer.site { border-top: 1px solid var(--border); color: var(--muted); font-size: 0.82rem; padding: 1.5rem 0; margin-top: 3rem; }
+
+#search { margin: 1rem 0; }

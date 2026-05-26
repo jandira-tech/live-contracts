@@ -1,0 +1,28 @@
+---
+import Base from '../layouts/Base.astro';
+
+// Pagefind search UI, loaded purely client-side from the index that
+// `astro build` (astro-pagefind integration) writes to /pagefind/. No SSR/node
+// dependency, so it prerenders cleanly on the Cloudflare adapter.
+export const prerender = true;
+---
+<Base title="Search EX-10 agreements">
+  <section class="hero">
+    <h1>Search agreements</h1>
+    <p>Full-text search across every indexed EX-10 material contract.</p>
+  </section>
+  <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
+  <div id="search"></div>
+  <script is:inline>
+    (function () {
+      function init() {
+        // eslint-disable-next-line no-undef
+        new PagefindUI({ element: '#search', showImages: false, showSubResults: true });
+      }
+      var s = document.createElement('script');
+      s.src = '/pagefind/pagefind-ui.js';
+      s.onload = init;
+      document.head.appendChild(s);
+    })();
+  </script>
+</Base>

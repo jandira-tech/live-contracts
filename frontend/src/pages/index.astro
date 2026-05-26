@@ -1,0 +1,34 @@
+---
+import Base from '../layouts/Base.astro';
+import AgreementCard from '../components/AgreementCard.astro';
+import { getLiveCollection } from 'astro:content';
+import type { Ex10Summary } from '../lib/api';
+
+// Live, request-time: agreements found in the last 60 seconds. Page auto-refreshes
+// every 60s (Base refreshSeconds) so the window always shows the newest material
+// contracts the backend has captured.
+const WINDOW = 60;
+const { entries, error } = await getLiveCollection('agreements', { filter: { seconds: WINDOW } });
+const items: Ex10Summary[] = (entries ?? []).map((e) => e.data as Ex10Summary);
+---
+<Base refreshSeconds={WINDOW}>
+  <section class="hero">
+    <div class="live-banner"><span class="live-dot"></span> LIVE · refreshing every {WINDOW}s</div>
+    <h1>New agreements in the last {WINDOW} seconds</h1>
+    <p>Traditional EX-10 material contract exhibits, the moment they hit SEC EDGAR.</p>
+  </section>
+
+  {error ? (
+    <div class="empty">The live feed is temporarily unavailable. Retrying on next refresh…</div>
+  ) : items.length === 0 ? (
+    <div class="empty">No new EX-10 agreements in the last {WINDOW} seconds. Watching the wire…</div>
+  ) : (
+    <div class="grid">
+      {items.map((item) => <AgreementCard item={item} />)}
+    </div>
+  )}
+
+  <div class="pagination">
+    <a href="/agreements/1">Browse all agreements →</a>
+  </div>
+</Base>

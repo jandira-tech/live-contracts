@@ -1,0 +1,45 @@
+---
+import Base from '../../layouts/Base.astro';
+import { listAllEx10, ex10Detail } from '../../lib/api';
+import type { GetStaticPaths } from 'astro';
+import { marked } from 'marked';
+
+// Prerendered detail pages: full markdown rendered to HTML and indexed by Pagefind.
+export const prerender = true;
+
+export const getStaticPaths = (async () => {
+  const all = await listAllEx10();
+  return all.map((item) => ({ params: { id: String(item.id) } }));
+}) satisfies GetStaticPaths;
+
+const { id } = Astro.params;
+const detail = await ex10Detail(id!);
+
+if (!detail) {
+  return Astro.redirect('/404');
+}
+
+const html = detail.markdown ? marked.parse(detail.markdown) : '';
+const title = detail.description?.trim() || `${detail.doc_type} — ${detail.filename}`;
+---
+<Base title={title} description={`EX-10 material contract: ${title}`}>
+  <section class="hero">
+    <div class="meta" style="display:flex;gap:.5rem;flex-wrap:wrap;font-family:var(--mono);font-size:.78rem;color:var(--muted);margin-bottom:.5rem">
+      <span class="badge ex10">{detail.doc_type}</span>
+      <span class="badge form">{detail.form_type}</span>
+      <span class="badge">CIK {detail.cik}</span>
+      <span class="badge">{detail.accession}</span>
+    </div>
+    <h1 data-pagefind-meta="title">{title}</h1>
+    <p>
+      <a href={detail.filing_url} rel="noopener" target="_blank">View original filing on SEC EDGAR →</a>
+      &nbsp;·&nbsp; seen {detail.found_at} UTC
+    </p>
+  </section>
+
+  <article class="prose" data-pagefind-body>
+    {html ? <Fragment set:html={html} /> : <p class="empty">Markdown for this exhibit is still being generated.</p>}
+  </article>
+
+  <div class="pagination"><a href="/agreements/1">← Back to all agreements</a></div>
+</Base>

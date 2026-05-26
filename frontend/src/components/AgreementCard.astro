@@ -1,0 +1,19 @@
+---
+import type { Ex10Summary } from '../lib/api';
+
+interface Props { item: Ex10Summary; }
+const { item } = Astro.props;
+
+const title = item.description?.trim() || `${item.doc_type} — ${item.filename}`;
+---
+<a class="card" href={`/agreement/${item.id}`} data-pagefind-body>
+  <div class="meta">
+    <span class="badge ex10">{item.doc_type}</span>
+    <span class="badge form">{item.form_type}</span>
+    <span class="badge">CIK {item.cik}</span>
+    <span class="badge">{item.accession}</span>
+  </div>
+  <h3 data-pagefind-meta="title">{title}</h3>
+  {item.excerpt ? <p class="excerpt">{item.excerpt}</p> : null}
+  <div class="time">filed/seen {item.found_at} UTC</div>
+</a>

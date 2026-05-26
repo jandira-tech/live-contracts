@@ -1,0 +1,49 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+  /** Inject <meta refresh> for live auto-refresh pages. */
+  refreshSeconds?: number;
+}
+
+const {
+  title = 'SEC EX-10 Live — Material Contracts',
+  description = 'Real-time feed of EX-10 material contract exhibits filed with the SEC.',
+  refreshSeconds,
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    {refreshSeconds ? <meta http-equiv="refresh" content={String(refreshSeconds)} /> : null}
+    <title>{title}</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📄</text></svg>" />
+  </head>
+  <body>
+    <header class="site">
+      <div class="container row">
+        <div class="brand">SEC <span class="tag">EX-10</span> Live</div>
+        <nav>
+          <a href="/">Live</a>
+          <a href="/agreements/1">Browse</a>
+          <a href="/search">Search</a>
+        </nav>
+      </div>
+    </header>
+    <main class="container">
+      <slot />
+    </main>
+    <footer class="site">
+      <div class="container">
+        Material contract (EX-10) exhibits extracted from SEC EDGAR in near real time.
+        Data is public SEC filing information. Not legal or investment advice.
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,84 @@
+/**
+ * Typed client for the internal SEC EX-10 API.
+ *
+ * The API is private (localhost / Cloudflare Tunnel). The Worker holds the key.
+ * Every call is defensive: a network error or non-200 yields an empty result
+ * instead of throwing, so neither the build (prerender) nor a live request
+ * ever hard-fails because the origin blipped.
+ */
+import { SEC_API_URL, SEC_API_KEY } from 'astro:env/server';
+
+export interface Ex10Summary {
+  id: number;
+  accession: string;
+  cik: string;
+  form_type: string;
+  doc_type: string;
+  filename: string;
+  description: string;
+  filing_url: string;
+  found_at: string;
+  markdown_status: string;
+  excerpt: string;
+  has_markdown: boolean;
+}
+
+export interface Ex10Detail extends Ex10Summary {
+  markdown: string;
+  sequence: string;
+}
+
+export interface PageResult {
+  items: Ex10Summary[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+function headers(): Record<string, string> {
+  const h: Record<string, string> = { Accept: 'application/json' };
+  if (SEC_API_KEY) h['X-API-Key'] = SEC_API_KEY;
+  return h;
+}
+
+async function getJson<T>(path: string, fallback: T): Promise<T> {
+  try {
+    const res = await fetch(`${SEC_API_URL}${path}`, { headers: headers() });
+    if (!res.ok) return fallback;
+    return (await res.json()) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function listEx10(page = 1, pageSize = 20): Promise<PageResult> {
+  return getJson<PageResult>(`/api/ex10?page=${page}&page_size=${pageSize}`, {
+    items: [],
+    total: 0,
+    page,
+    page_size: pageSize,
+    total_pages: 0,
+  });
+}
+
+export async function ex10Since(seconds = 60): Promise<{ window_seconds: number; count: number; items: Ex10Summary[] }> {
+  return getJson(`/api/ex10/since?seconds=${seconds}`, { window_seconds: seconds, count: 0, items: [] });
+}
+
+export async function ex10Detail(id: number | string): Promise<Ex10Detail | null> {
+  return getJson<Ex10Detail | null>(`/api/ex10/${id}`, null);
+}
+
+/** Build-time helper: page through the whole collection for prerendering. */
+export async function listAllEx10(pageSize = 100, max = 5000): Promise<Ex10Summary[]> {
+  const all: Ex10Summary[] = [];
+  let page = 1;
+  while (all.length < max) {
+    const res = await listEx10(page, pageSize);
+    all.push(...res.items);
+    if (res.items.length === 0 || page >= res.total_pages) break;
+    page += 1;
+  }
+  return all;
+}

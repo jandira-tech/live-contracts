@@ -1,0 +1,40 @@
+---
+import Base from '../../layouts/Base.astro';
+import AgreementCard from '../../components/AgreementCard.astro';
+import { listAllEx10, type Ex10Summary } from '../../lib/api';
+import type { GetStaticPaths, Page } from 'astro';
+
+// Prerendered + native pagination. A build-time snapshot is sliced into pages
+// via Astro's paginate(); these static pages are what Pagefind indexes for search.
+export const prerender = true;
+
+export const getStaticPaths = (async ({ paginate }) => {
+  const all = await listAllEx10();
+  return paginate(all, { pageSize: 12 });
+}) satisfies GetStaticPaths;
+
+interface Props { page: Page<Ex10Summary>; }
+const { page } = Astro.props;
+---
+<Base title={`Agreements — page ${page.currentPage}`}>
+  <section class="hero">
+    <h1>All EX-10 agreements</h1>
+    <p>{page.total} material contract exhibits · page {page.currentPage} of {page.lastPage}</p>
+  </section>
+
+  {page.data.length === 0 ? (
+    <div class="empty">No agreements indexed yet.</div>
+  ) : (
+    <div class="grid">
+      {page.data.map((item) => <AgreementCard item={item} />)}
+    </div>
+  )}
+
+  <nav class="pagination" aria-label="Pagination">
+    {page.url.first ? <a href={page.url.first}>« First</a> : <span class="disabled">« First</span>}
+    {page.url.prev ? <a href={page.url.prev}>‹ Prev</a> : <span class="disabled">‹ Prev</span>}
+    <span class="current">{page.currentPage} / {page.lastPage}</span>
+    {page.url.next ? <a href={page.url.next}>Next ›</a> : <span class="disabled">Next ›</span>}
+    {page.url.last ? <a href={page.url.last}>Last »</a> : <span class="disabled">Last »</span>}
+  </nav>
+</Base>
