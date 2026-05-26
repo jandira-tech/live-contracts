@@ -16,7 +16,5 @@
     "astro": "^6.3.7",
     "marked": "^16.0.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64"]
-  }
+  "trustedDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64"]
 }

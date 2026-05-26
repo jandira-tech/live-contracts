@@ -1,6 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
-import AgreementCard from '../components/AgreementCard.astro';
+import AgreementRow from '../components/AgreementRow.astro';
 import { ex10Search } from '../lib/api';
 
 // Live full-text search (replaces the build-time Pagefind index): queries the
@@ -19,24 +19,28 @@ const qs = (p: number) => `/search?q=${encodeURIComponent(q)}&page=${p}`;
 Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
 ---
 <Base title={q ? `Search: ${q}` : 'Search EX-10 agreements'}>
-  <section class="hero">
+  <header class="sl-hero">
+    <div class="sl-hero-eyebrow"><span>SEARCH</span></div>
     <h1>Search agreements</h1>
-    <p>Live full-text search across every EX-10 material contract.</p>
-    <form method="get" action="/search" class="search-form">
+    <p class="lede">Live full-text search across every EX-10 material contract.</p>
+    <form method="get" action="/search" class="sl-search-row">
       <input type="search" name="q" value={q} placeholder="Search agreements, parties, terms…" autofocus aria-label="Search" />
       <button type="submit">Search</button>
     </form>
-  </section>
+    <div class="sl-search-hint">Press enter to search · matches description &amp; full markdown text</div>
+  </header>
 
   {result && (
     <>
-      <p class="search-meta">{(result.total ?? 0).toLocaleString()} result{result.total === 1 ? '' : 's'} for “{q}”</p>
+      <div class="sl-results-bar">
+        <span class="count"><strong>{(result.total ?? 0).toLocaleString()}</strong> result{result.total === 1 ? '' : 's'} for “{q}”</span>
+      </div>
       {result.items.length === 0 ? (
         <div class="empty">No matches. Try a different term.</div>
       ) : (
-        <div class="grid">
-          {result.items.map((item) => <AgreementCard item={item} />)}
-        </div>
+        <section class="sl-feed">
+          {result.items.map((item) => <AgreementRow item={item} />)}
+        </section>
       )}
       {lastPage > 1 && (
         <nav class="pagination" aria-label="Pagination">
