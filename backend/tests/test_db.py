@@ -210,7 +210,108 @@ def test_insert_exhibits_bulk_maps_empty_to_null(db):
     db.insert_exhibits_bulk([
         {"accession": "r1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1", "filename": "r.htm",
          "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 10:00:00",
-         "markdown": "", "markdown_status": "", "filing_metadata": ""},
+         "markdown": "", "markdown_status": "", "filing_metadata": "", "image_urls": ""},
     ])
     assert [r["accession"] for r in db.exhibits_missing_markdown(limit=10)] == ["r1"]  # "" -> NULL -> pending
-    assert db.recent_ex10()[0]["filing_metadata"] is None
+    row = db.recent_ex10()[0]
+    assert row["filing_metadata"] is None
+    assert row["image_urls"] is None  # "" -> NULL so exhibits_pending_images still selects it
+
+
+def test_image_urls_column_update_and_pending(db):
+    import json
+    db.save_ex10_exhibit(
+        {"accession": "img-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "i.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="(ex10-1_001.jpg) (ex10-1_002.jpg)",  # image-only body, status done
+    )
+    db.save_ex10_exhibit(
+        {"accession": "txt-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.2",
+         "filename": "t.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="Real contract text only, no images",
+    )
+    assert "image_urls" in db.column_names("ex10_exhibits")
+    # pending = done + image_urls NULL + has an image ref
+    pending = {r["accession"] for r in db.exhibits_pending_images(limit=10)}
+    assert pending == {"img-1"}  # txt-1 has no image ref
+    pid = next(r["id"] for r in db.exhibits_pending_images(limit=10))
+    db.update_image_urls(pid, ["https://hf/x/ex10-1_001.jpg"])
+    # now stored + no longer pending
+    assert db.exhibits_pending_images(limit=10) == []
+    row = next(r for r in db.recent_ex10() if r["accession"] == "img-1")
+    assert json.loads(row["image_urls"]) == ["https://hf/x/ex10-1_001.jpg"]
+
+
+def test_recent_ex10_orders_by_filed_at_over_found_at(db):
+    # A captured later (newer found_at) but FILED earlier; B captured earlier but FILED later.
+    db.insert_exhibits_bulk([
+        {"accession": "A", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1", "filename": "a.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 22:00:00",
+         "markdown": "x", "markdown_status": "done", "filing_metadata": '{"filed_at":"20260526170000"}'},
+        {"accession": "B", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.2", "filename": "b.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 21:00:00",
+         "markdown": "x", "markdown_status": "done", "filing_metadata": '{"filed_at":"20260526180000"}'},
+    ])
+    # Newest by *filing* time first -> B (18:00) then A (17:00), not found_at order.
+    assert [r["accession"] for r in db.recent_ex10()] == ["B", "A"]
+
+
+def test_recent_ex10_filed_at_nulls_sink_below_filed(db):
+    # Row with filed_at ranks above a row without it (older, unbackfilled).
+    db.insert_exhibits_bulk([
+        {"accession": "nofiled", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1", "filename": "n.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 23:00:00",
+         "markdown": "x", "markdown_status": "done", "filing_metadata": None},
+        {"accession": "hasfiled", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.2", "filename": "h.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 20:00:00",
+         "markdown": "x", "markdown_status": "done", "filing_metadata": '{"filed_at":"20260526190000"}'},
+    ])
+    assert [r["accession"] for r in db.recent_ex10()] == ["hasfiled", "nofiled"]
+
+
+def test_filed_at_expression_index_created(db):
+    # An expression index backs the filed_at ORDER BY (avoids JSON parse per row).
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_ex10_filed_at'"
+        ).fetchone()
+    assert row is not None and "filed_at" in row[0]
+def _bulk(db, *rows):
+    db.insert_exhibits_bulk([
+        {"accession": a, "cik": c, "form_type": ft, "doc_type": "EX-10.1", "filename": f"{a}.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": fa, "markdown": "x",
+         "markdown_status": "done", "filing_metadata": fm}
+        for (a, c, ft, fa, fm) in rows
+    ])
+
+
+def test_browse_filters_by_form_cik_and_filer(db):
+    _bulk(db,
+        ("a", "111", "8-K", "2026-05-26 10:00:00", '{"filed_at":"20260526100000","company_name":"Acme Corp"}'),
+        ("b", "222", "10-Q", "2026-05-26 11:00:00", '{"filed_at":"20260526110000","company_name":"Beta LLC"}'),
+        ("c", "111", "8-K", "2026-05-26 12:00:00", '{"filed_at":"20260526120000","company_name":"Acme Corp"}'),
+    )
+    assert {r["accession"] for r in db.recent_ex10(form="8-K")} == {"a", "c"}
+    assert {r["accession"] for r in db.recent_ex10(cik="222")} == {"b"}
+    assert {r["accession"] for r in db.recent_ex10(filer="acme")} == {"a", "c"}  # case-insensitive
+    assert db.count_ex10(form="8-K") == 2
+    assert db.count_ex10(cik="222") == 1
+
+
+def test_browse_sort_oldest_reverses(db):
+    _bulk(db,
+        ("old", "1", "8-K", "2026-05-26 10:00:00", '{"filed_at":"20260526100000"}'),
+        ("new", "1", "8-K", "2026-05-26 12:00:00", '{"filed_at":"20260526120000"}'),
+    )
+    assert [r["accession"] for r in db.recent_ex10()] == ["new", "old"]            # newest default
+    assert [r["accession"] for r in db.recent_ex10(oldest=True)] == ["old", "new"]  # oldest first
+
+
+def test_form_facets_counts(db):
+    _bulk(db,
+        ("a", "1", "8-K", "2026-05-26 10:00:00", "{}"),
+        ("b", "1", "8-K", "2026-05-26 11:00:00", "{}"),
+        ("c", "1", "10-Q", "2026-05-26 12:00:00", "{}"),
+    )
+    facets = dict((f["form_type"], f["count"]) for f in db.form_facets())
+    assert facets == {"8-K": 2, "10-Q": 1}

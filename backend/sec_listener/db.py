@@ -79,8 +79,15 @@ class Database:
             self._ensure_column(conn, "ex10_exhibits", "markdown", "TEXT")
             self._ensure_column(conn, "ex10_exhibits", "markdown_status", "TEXT")
             self._ensure_column(conn, "ex10_exhibits", "filing_metadata", "TEXT")
+            self._ensure_column(conn, "ex10_exhibits", "image_urls", "TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ex10_found_at ON ex10_exhibits(found_at)"
+            )
+            # Expression index backing the filed_at ORDER BY (avoids a JSON parse +
+            # filesort per row as the table grows).
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ex10_filed_at "
+                "ON ex10_exhibits(json_extract(filing_metadata, '$.filed_at'))"
             )
             conn.commit()
 
@@ -190,6 +197,34 @@ class Database:
             )
             conn.commit()
 
+    def update_image_urls(self, exhibit_id: int, urls: list[str]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE ex10_exhibits SET image_urls = ? WHERE id = ?",
+                (json.dumps(urls), exhibit_id),
+            )
+            conn.commit()
+
+    def exhibits_pending_images(self, limit: int = 25) -> list[dict[str, Any]]:
+        """Converted exhibits not yet checked for images that reference an image file.
+
+        image_urls IS NULL = not yet processed; once checked it's '[]' or a URL list.
+        Returns full markdown (image-only bodies are short) so the caller can confirm
+        with is_image_only().
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT id, accession, cik, markdown FROM ex10_exhibits
+                   WHERE image_urls IS NULL AND markdown_status = 'done'
+                     AND (markdown LIKE '%.jpg%' OR markdown LIKE '%.jpeg%'
+                          OR markdown LIKE '%.png%' OR markdown LIKE '%.gif%'
+                          OR markdown LIKE '%.tif%' OR markdown LIKE '%.tiff%'
+                          OR markdown LIKE '%.svg%' OR markdown LIKE '%.webp%')
+                   ORDER BY found_at DESC, id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def insert_exhibits_bulk(self, records: list[dict[str, Any]]) -> int:
         """Load exhibit rows (e.g. restored from the HF dataset) preserving found_at.
 
@@ -202,13 +237,14 @@ class Database:
                 cur = conn.execute(
                     """INSERT OR IGNORE INTO ex10_exhibits
                        (accession, cik, form_type, doc_type, filename, description, sequence,
-                        filing_url, found_at, markdown, markdown_status, filing_metadata)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        filing_url, found_at, markdown, markdown_status, filing_metadata, image_urls)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         r.get("accession"), r.get("cik"), r.get("form_type"), r.get("doc_type"),
                         r.get("filename"), r.get("description"), r.get("sequence"),
                         r.get("filing_url"), r.get("found_at"), r.get("markdown") or None,
                         r.get("markdown_status") or None, r.get("filing_metadata") or None,
+                        r.get("image_urls") or None,
                     ),
                 )
                 inserted += cur.rowcount
@@ -221,29 +257,72 @@ class Database:
     # memory per row — important on small hosts. Detail reads use SELECT *.
     _SUMMARY_COLS = (
         "id, accession, cik, form_type, doc_type, filename, description, sequence, "
-        "filing_url, found_at, markdown_status, filing_metadata, "
+        "filing_url, found_at, markdown_status, filing_metadata, image_urls, "
         "SUBSTR(markdown, 1, 2000) AS markdown"
     )
 
-    def recent_ex10(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    # Newest-by-actual-filing-time first: the displayed time is the SEC acceptance
+    # timestamp (filing_metadata.filed_at, "YYYYMMDDHHMMSS" — lexical = chronological).
+    # Rows not yet backfilled (NULL) sink below; found_at/id break ties.
+    _LIST_ORDER = (
+        "ORDER BY json_extract(filing_metadata, '$.filed_at') DESC NULLS LAST, "
+        "found_at DESC, id DESC"
+    )
+    _LIST_ORDER_ASC = (
+        "ORDER BY json_extract(filing_metadata, '$.filed_at') ASC NULLS LAST, "
+        "found_at ASC, id ASC"
+    )
+
+    @staticmethod
+    def _browse_where(form: str | None, cik: str | None, filer: str | None) -> tuple[str, list]:
+        clauses, params = [], []
+        if form:
+            clauses.append("form_type = ?")
+            params.append(form)
+        if cik:
+            clauses.append("cik = ?")
+            params.append(cik)
+        if filer:
+            clauses.append("json_extract(filing_metadata, '$.company_name') LIKE ? COLLATE NOCASE")
+            params.append(f"%{filer}%")
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        return where, params
+
+    def recent_ex10(self, limit: int = 50, offset: int = 0, *, form: str | None = None,
+                    cik: str | None = None, filer: str | None = None, oldest: bool = False) -> list[dict[str, Any]]:
+        where, params = self._browse_where(form, cik, filer)
+        order = self._LIST_ORDER_ASC if oldest else self._LIST_ORDER
         with self.connect() as conn:
             rows = conn.execute(
-                f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
-                    ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
-                (limit, offset),
+                f"SELECT {self._SUMMARY_COLS} FROM ex10_exhibits {where} {order} LIMIT ? OFFSET ?",
+                (*params, limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def count_ex10(self) -> int:
+    def count_ex10(self, *, form: str | None = None, cik: str | None = None,
+                   filer: str | None = None) -> int:
+        where, params = self._browse_where(form, cik, filer)
         with self.connect() as conn:
-            return conn.execute("SELECT COUNT(*) FROM ex10_exhibits").fetchone()[0]
+            return conn.execute(
+                f"SELECT COUNT(*) FROM ex10_exhibits {where}", params
+            ).fetchone()[0]
+
+    def form_facets(self) -> list[dict[str, Any]]:
+        """Form-type counts for the Browse filter sidebar, most common first."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT form_type, COUNT(*) AS count FROM ex10_exhibits
+                   WHERE form_type IS NOT NULL AND form_type <> ''
+                   GROUP BY form_type ORDER BY count DESC, form_type ASC"""
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def ex10_since(self, seconds: int) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
                 f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
                     WHERE found_at >= datetime('now', ?)
-                    ORDER BY found_at DESC, id DESC""",
+                    {self._LIST_ORDER}""",
                 (f"-{int(seconds)} seconds",),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -293,7 +372,7 @@ class Database:
                 f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
                     WHERE description LIKE ? ESCAPE '\\' COLLATE NOCASE
                        OR markdown LIKE ? ESCAPE '\\' COLLATE NOCASE
-                    ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
+                    {self._LIST_ORDER} LIMIT ? OFFSET ?""",
                 (like, like, limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]

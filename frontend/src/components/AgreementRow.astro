@@ -23,6 +23,9 @@ const filedLabel = `FILED ${formatFiledAt(item.filed_at) || formatNY(item.found_
   <div class="sl-row-body">
     <h3>{title}</h3>
     {item.excerpt ? <p class="excerpt">{item.excerpt}</p> : null}
+    {!item.excerpt && item.image_urls?.length ? (
+      <p class="scanned">📄 Scanned document · {item.image_urls.length} page{item.image_urls.length === 1 ? '' : 's'}</p>
+    ) : null}
     <div class="filed">
       <span>{filedLabel}</span>
     </div>
