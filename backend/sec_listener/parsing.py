@@ -79,15 +79,17 @@ def extract_filing_header(content: dict | None) -> dict:
         "state_of_incorporation": "",
         "period": "",
         "filing_date": "",
+        "filed_at": "",
         "file_number": "",
         "location": "",
         "items": [],
     }
-    if not content:
+    # Malformed SGML can parse `content` itself — or any nested section — as a
+    # non-dict (str/list/number); guard every level so a single bad filing never
+    # raises into the listener loop.
+    if not isinstance(content, dict):
         return header
 
-    # Malformed SGML can parse any of these sections as a non-dict (str/list/number);
-    # guard every level so a single bad filing never raises into the listener loop.
     filer = content.get("filer")
     if isinstance(filer, list):
         filer = filer[0] if filer else {}
@@ -107,6 +109,8 @@ def extract_filing_header(content: dict | None) -> dict:
     header["file_number"] = values.get("file-number", "") or ""
     header["period"] = content.get("period", "") or ""
     header["filing_date"] = content.get("filing-date", "") or ""
+    # Actual SEC acceptance timestamp (ET), "YYYYMMDDHHMMSS" — the real filing time.
+    header["filed_at"] = content.get("acceptance-datetime", "") or ""
 
     city, state = addr.get("city", ""), addr.get("state", "")
     header["location"] = ", ".join(p for p in (city, state) if p)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import time
 
@@ -35,24 +36,31 @@ def _as_text(content) -> str:
 
 class BackfillWorker:
     def __init__(self, db: Database, *, fetcher=None, convert_fn=convert_html_to_markdown,
-                 metadata_fetcher=None, metadata_request_delay: float = 0.12, sleep_fn=time.sleep):
+                 metadata_fetcher=None, request_delay: float = 0.12, sleep_fn=time.sleep,
+                 image_token: str | None = None, image_repo: str | None = None, image_capture_fn=None):
         self.db = db
         # fetcher(accession, cik, filename) -> raw document content (str/bytes) or ""
         self.fetcher = fetcher or self._datamule_fetcher
         # metadata_fetcher(accession, cik) -> compact filing header dict
         self.metadata_fetcher = metadata_fetcher or self._datamule_metadata_fetcher
         self.convert_fn = convert_fn
-        # Per-request throttle for the metadata backfill loop: SEC caps clients at
-        # 10 req/s, and a full batch fires that many sec.gov fetches back-to-back.
-        # Injectable so tests don't actually sleep.
-        self.metadata_request_delay = metadata_request_delay
+        # Per-request throttle for the sec.gov backfill loops (markdown + metadata +
+        # images): SEC caps clients at 10 req/s. Injectable so tests don't sleep.
+        self.request_delay = request_delay
         self._sleep = sleep_fn
+        # Scanned-exhibit image capture -> HF dataset. Opt-in via image_token (HF_TOKEN).
+        self.image_token = image_token
+        from .images import DATASET_REPO as _IMG_REPO
+        self.image_repo = image_repo or _IMG_REPO
+        self._capture_images = image_capture_fn or self._datamule_capture_images
 
     def backfill_batch(self, limit: int = 25) -> int:
         """Convert up to ``limit`` pending exhibits. Returns the number converted."""
         rows = self.db.exhibits_missing_markdown(limit=limit)
         converted = 0
         for row in rows:
+            if self.request_delay > 0:
+                self._sleep(self.request_delay)  # respect SEC's 10 req/s cap
             try:
                 content = self.fetcher(row["accession"], row["cik"], row["filename"])
             except Exception as exc:  # noqa: BLE001 - isolate each row
@@ -84,8 +92,8 @@ class BackfillWorker:
         rows = self.db.exhibits_missing_filing_metadata(limit=limit)
         filled = 0
         for row in rows:
-            if self.metadata_request_delay:
-                self._sleep(self.metadata_request_delay)  # respect SEC's 10 req/s cap
+            if self.request_delay > 0:
+                self._sleep(self.request_delay)  # respect SEC's 10 req/s cap
             try:
                 meta = self.metadata_fetcher(row["accession"], row["cik"])
             except Exception as exc:  # noqa: BLE001 - isolate each row
@@ -98,7 +106,44 @@ class BackfillWorker:
                 filled += 1
         return filled
 
+    def backfill_images_batch(self, limit: int = 25) -> int:
+        """Capture images for scanned (image-only) exhibits → HF dataset URLs.
+
+        Each converted exhibit is checked once: image-only rows get their image
+        URLs, others are marked '[]' (so they're not rescanned). No-op without a
+        token. Returns the number of rows for which images were captured.
+        """
+        if not self.image_token:
+            return 0
+        from .api import clean_excerpt
+        from .images import image_filenames, is_image_only
+
+        rows = self.db.exhibits_pending_images(limit=limit)
+        captured = 0
+        for row in rows:
+            if not is_image_only(row["markdown"], clean_excerpt_fn=clean_excerpt):
+                self.db.update_image_urls(row["id"], [])  # checked, not image-only
+                continue
+            if self.request_delay > 0:
+                self._sleep(self.request_delay)  # respect SEC's 10 req/s cap
+            only = set(image_filenames(row["markdown"]))  # only THIS exhibit's images
+            try:
+                urls = self._capture_images(row["accession"], row["cik"], only)
+            except Exception as exc:  # noqa: BLE001 - isolate each row
+                logger.warning("image capture failed for %s: %s", row["accession"], exc)
+                continue  # leave image_urls NULL -> retried next cycle, not marked permanently
+            if urls:
+                self.db.update_image_urls(row["id"], urls)
+                captured += 1
+            # else: nothing captured (transient/none) -> leave NULL so it retries
+        return captured
+
     # --- live fetch ---------------------------------------------------------
+    def _datamule_capture_images(self, accession: str, cik: str, only: set[str] | None = None) -> list[str]:
+        from .images import capture_images
+
+        return capture_images(accession, cik, token=self.image_token, repo=self.image_repo, only=only)
+
     def _datamule_metadata_fetcher(self, accession: str, cik: str) -> dict:
         from datamule import Submission, format_accession
 
@@ -135,6 +180,9 @@ class BackfillWorker:
                 m = await asyncio.to_thread(self.backfill_metadata_batch, batch)
                 if m:
                     logger.info("Backfilled %d exhibits with filing metadata", m)
+                img = await asyncio.to_thread(self.backfill_images_batch, batch)
+                if img:
+                    logger.info("Captured images for %d scanned exhibits", img)
                 # If we did a full batch there is likely more; loop quickly but
                 # respect SEC rate limits. Otherwise idle longer.
                 await asyncio.sleep(interval if n < batch else max(1.0, batch / rps))
@@ -146,16 +194,51 @@ class BackfillWorker:
         logger.info("Backfill worker stopped")
 
 
+async def _hf_sync_loop(db: Database, *, token: str, repo: str, interval: float):
+    """Periodically mirror ex10_exhibits to the HF dataset (parallel SQL sink).
+
+    SQLite stays authoritative; failures here never disturb the listener/backfill.
+    """
+    from .hf_sync import sync_exhibits
+
+    logger.info("HF dataset sync enabled -> %s (every %.0fs)", repo, interval)
+    while True:
+        try:
+            n = await asyncio.to_thread(sync_exhibits, db, repo, token=token)
+            if n:
+                logger.info("HF sync: snapshotted %d exhibits to %s", n, repo)
+        except Exception as exc:  # noqa: BLE001 - the mirror must never crash the worker
+            logger.warning("HF dataset sync failed: %s", exc)
+        # CancelledError (BaseException) propagates out to end the task — idiomatic.
+        await asyncio.sleep(interval)
+
+
 async def _run_all(config: Config):
     db = Database(config.db_path)
     db.init()
     listener = Listener(config, db)
-    worker = BackfillWorker(db)
+    worker = BackfillWorker(db, image_token=os.environ.get("HF_TOKEN"))
 
     tasks = [
         asyncio.create_task(listener.run(), name="listener"),
         asyncio.create_task(worker.run(rps=config.requests_per_second), name="backfill"),
     ]
+
+    # Parallel HF dataset sink — opt-in via HF_TOKEN. Without it, SQLite is the
+    # sole (plan-B) store and nothing here runs.
+    hf_token = os.environ.get("HF_TOKEN")
+    if hf_token:
+        from .hf_sync import DATASET_REPO
+
+        tasks.append(asyncio.create_task(
+            _hf_sync_loop(
+                db,
+                token=hf_token,
+                repo=os.environ.get("HF_DATASET_REPO", DATASET_REPO),
+                interval=float(os.environ.get("SEC_HF_SYNC_INTERVAL", "900")),
+            ),
+            name="hf-sync",
+        ))
 
     # Optionally serve the internal API in-process, so one supervised process
     # covers listening, backfill, and the API. Still localhost/key-gated.
