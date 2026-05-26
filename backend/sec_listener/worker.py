@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import time
 
@@ -146,6 +147,26 @@ class BackfillWorker:
         logger.info("Backfill worker stopped")
 
 
+async def _hf_sync_loop(db: Database, *, token: str, repo: str, interval: float):
+    """Periodically mirror ex10_exhibits to the HF dataset (parallel SQL sink).
+
+    SQLite stays authoritative; failures here never disturb the listener/backfill.
+    """
+    from .hf_sync import sync_exhibits
+
+    logger.info("HF dataset sync enabled -> %s (every %.0fs)", repo, interval)
+    while True:
+        try:
+            n = await asyncio.to_thread(sync_exhibits, db, repo, token=token)
+            if n:
+                logger.info("HF sync: snapshotted %d exhibits to %s", n, repo)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:  # noqa: BLE001 - the mirror must never crash the worker
+            logger.warning("HF dataset sync failed: %s", exc)
+        await asyncio.sleep(interval)
+
+
 async def _run_all(config: Config):
     db = Database(config.db_path)
     db.init()
@@ -156,6 +177,22 @@ async def _run_all(config: Config):
         asyncio.create_task(listener.run(), name="listener"),
         asyncio.create_task(worker.run(rps=config.requests_per_second), name="backfill"),
     ]
+
+    # Parallel HF dataset sink — opt-in via HF_TOKEN. Without it, SQLite is the
+    # sole (plan-B) store and nothing here runs.
+    hf_token = os.environ.get("HF_TOKEN")
+    if hf_token:
+        from .hf_sync import DATASET_REPO
+
+        tasks.append(asyncio.create_task(
+            _hf_sync_loop(
+                db,
+                token=hf_token,
+                repo=os.environ.get("HF_DATASET_REPO", DATASET_REPO),
+                interval=float(os.environ.get("SEC_HF_SYNC_INTERVAL", "900")),
+            ),
+            name="hf-sync",
+        ))
 
     # Optionally serve the internal API in-process, so one supervised process
     # covers listening, backfill, and the API. Still localhost/key-gated.

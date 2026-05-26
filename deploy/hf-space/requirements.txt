@@ -3,3 +3,5 @@ datamule
 markitdown
 fastapi
 uvicorn[standard]
+huggingface_hub
+pyarrow

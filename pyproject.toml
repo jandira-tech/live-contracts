@@ -10,6 +10,10 @@ dependencies = [
     "markitdown",
     "fastapi",
     "uvicorn[standard]",
+    # Parallel HF dataset sink (parquet snapshot of ex10_exhibits). Optional at
+    # runtime — sync no-ops without HF_TOKEN, so SQLite stays the plan-B store.
+    "huggingface_hub",
+    "pyarrow",
 ]
 
 [project.optional-dependencies]
