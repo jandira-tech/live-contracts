@@ -51,7 +51,8 @@ def to_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         md = r.get("markdown") or ""
         rec: dict[str, Any] = {"id": r.get("id")}
         for f in _STR_FIELDS:
-            rec[f] = r.get(f) or ""
+            val = r.get(f)
+            rec[f] = str(val) if val is not None else ""  # stable str column type for parquet
         rec["has_markdown"] = bool(md)
         rec["markdown"] = md
         records.append(rec)
@@ -96,8 +97,18 @@ def sync_exhibits(
         logger.debug("HF dataset sync skipped (no token)")
         return 0
     records = to_records(fetch_all_exhibits(db))
-    path = tmp_path or os.path.join(tempfile.mkdtemp(prefix="ex10-sync-"), "exhibits.parquet")
-    writer(records, path)
-    uploader(path, repo, token)
+    if not records:
+        # pyarrow can't infer a schema from an empty list; nothing to upload anyway.
+        logger.info("HF dataset sync skipped: no exhibits yet")
+        return 0
+    if tmp_path:
+        writer(records, tmp_path)
+        uploader(tmp_path, repo, token)
+    else:
+        # TemporaryDirectory cleans up the dir + parquet (sync runs every ~15 min).
+        with tempfile.TemporaryDirectory(prefix="ex10-sync-") as tmpdir:
+            path = os.path.join(tmpdir, "exhibits.parquet")
+            writer(records, path)
+            uploader(path, repo, token)
     logger.info("Synced %d exhibits to HF dataset %s", len(records), repo)
     return len(records)

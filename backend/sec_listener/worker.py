@@ -160,10 +160,9 @@ async def _hf_sync_loop(db: Database, *, token: str, repo: str, interval: float)
             n = await asyncio.to_thread(sync_exhibits, db, repo, token=token)
             if n:
                 logger.info("HF sync: snapshotted %d exhibits to %s", n, repo)
-        except asyncio.CancelledError:
-            break
         except Exception as exc:  # noqa: BLE001 - the mirror must never crash the worker
             logger.warning("HF dataset sync failed: %s", exc)
+        # CancelledError (BaseException) propagates out to end the task — idiomatic.
         await asyncio.sleep(interval)
 
 

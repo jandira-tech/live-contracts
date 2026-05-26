@@ -60,3 +60,19 @@ def test_sync_writes_all_rows_and_uploads(tmp_path):
     assert {r["accession"] for r in written["records"]} == {"x-1", "x-2"}
     assert uploaded["repo"] == "arthrod/sec-ex10-exhibits" and uploaded["token"] == "tok"
     assert uploaded["path"] == written["path"]  # uploads exactly what was written
+
+
+def test_to_records_coerces_non_string_fields_to_str():
+    rows = [{"id": 1, "cik": 12345, "sequence": 2, "accession": "a", "markdown": "x"}]
+    rec = hf_sync.to_records(rows)[0]
+    assert rec["cik"] == "12345" and rec["sequence"] == "2"  # ints -> str for stable parquet schema
+    assert isinstance(rec["accession"], str)
+
+
+def test_sync_noop_on_empty_db(tmp_path):
+    from sec_listener.db import Database
+    db = Database(str(tmp_path / "e.db")); db.init()  # no rows
+    calls = []
+    n = hf_sync.sync_exhibits(db, "repo", token="t",
+                              writer=lambda *a: calls.append("w"), uploader=lambda *a: calls.append("u"))
+    assert n == 0 and calls == []  # empty -> no parquet write (pyarrow would raise), no upload
