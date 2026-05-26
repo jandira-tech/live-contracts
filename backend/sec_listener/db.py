@@ -255,11 +255,19 @@ class Database:
         "SUBSTR(markdown, 1, 2000) AS markdown"
     )
 
+    # Newest-by-actual-filing-time first: the displayed time is the SEC acceptance
+    # timestamp (filing_metadata.filed_at, "YYYYMMDDHHMMSS" — lexical = chronological).
+    # Rows not yet backfilled (NULL) sink below; found_at/id break ties.
+    _LIST_ORDER = (
+        "ORDER BY json_extract(filing_metadata, '$.filed_at') DESC NULLS LAST, "
+        "found_at DESC, id DESC"
+    )
+
     def recent_ex10(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
                 f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
-                    ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
+                    {self._LIST_ORDER} LIMIT ? OFFSET ?""",
                 (limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -273,7 +281,7 @@ class Database:
             rows = conn.execute(
                 f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
                     WHERE found_at >= datetime('now', ?)
-                    ORDER BY found_at DESC, id DESC""",
+                    {self._LIST_ORDER}""",
                 (f"-{int(seconds)} seconds",),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -323,7 +331,7 @@ class Database:
                 f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
                     WHERE description LIKE ? ESCAPE '\\' COLLATE NOCASE
                        OR markdown LIKE ? ESCAPE '\\' COLLATE NOCASE
-                    ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
+                    {self._LIST_ORDER} LIMIT ? OFFSET ?""",
                 (like, like, limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]

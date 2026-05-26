@@ -24,7 +24,7 @@
   --bg: #FAFAF8;            /* near-white, warmth-shifted */
   --surface: #FFFFFF;       /* cards/panels, a hair above bg */
   --text: #0A0A0A;          /* near-black, warmth-shifted */
-  --text-secondary: #6B6B6B;/* neutral mid-grey */
+  --text-secondary: #4D4D4D;/* darker mid-grey — readable secondary text */
   --accent: #FFD400;        /* highlighter yellow — structural, never textual */
   --border: #E8E8E5;        /* hairline */
   --hover: #F0F0EE;         /* tile hover state */
@@ -208,7 +208,9 @@ footer.site .footer-links a:hover { text-decoration: none; color: var(--text); }
 .sl-row-meta .meta-line { display: block; margin-top: 4px; word-break: break-all; }
 
 .sl-row-body h3 { font-family: var(--font-body); font-size: 1rem; font-weight: 600; letter-spacing: -0.005em; line-height: 1.3; color: var(--text); margin: 0 0 0.6rem; }
-.sl-row-body p.excerpt { font-family: var(--font-body); font-size: 0.875rem; line-height: 1.55; color: var(--text-secondary); margin: 0 0 0.75rem; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* Up to 4 lines on desktop, 3 on mobile — don't over-prune the preview. */
+.sl-row-body p.excerpt { font-family: var(--font-body); font-size: 0.875rem; line-height: 1.55; color: var(--text-secondary); margin: 0 0 0.75rem; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 620px) { .sl-row-body p.excerpt { -webkit-line-clamp: 3; line-clamp: 3; } }
 .sl-row-body .scanned { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 0.75rem; }
 .sl-row-body .filed { font-family: var(--font-mono); font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-secondary); display: flex; gap: 0.5rem 0.9rem; flex-wrap: wrap; align-items: center; }
 /* Scanned-exhibit image gallery (detail page). */

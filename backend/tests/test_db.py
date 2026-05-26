@@ -240,3 +240,30 @@ def test_image_urls_column_update_and_pending(db):
     assert db.exhibits_pending_images(limit=10) == []
     row = next(r for r in db.recent_ex10() if r["accession"] == "img-1")
     assert json.loads(row["image_urls"]) == ["https://hf/x/ex10-1_001.jpg"]
+
+
+def test_recent_ex10_orders_by_filed_at_over_found_at(db):
+    # A captured later (newer found_at) but FILED earlier; B captured earlier but FILED later.
+    db.insert_exhibits_bulk([
+        {"accession": "A", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1", "filename": "a.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 22:00:00",
+         "markdown": "x", "markdown_status": "done", "filing_metadata": '{"filed_at":"20260526170000"}'},
+        {"accession": "B", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.2", "filename": "b.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 21:00:00",
+         "markdown": "x", "markdown_status": "done", "filing_metadata": '{"filed_at":"20260526180000"}'},
+    ])
+    # Newest by *filing* time first -> B (18:00) then A (17:00), not found_at order.
+    assert [r["accession"] for r in db.recent_ex10()] == ["B", "A"]
+
+
+def test_recent_ex10_filed_at_nulls_sink_below_filed(db):
+    # Row with filed_at ranks above a row without it (older, unbackfilled).
+    db.insert_exhibits_bulk([
+        {"accession": "nofiled", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1", "filename": "n.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 23:00:00",
+         "markdown": "x", "markdown_status": "done", "filing_metadata": None},
+        {"accession": "hasfiled", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.2", "filename": "h.htm",
+         "description": "", "sequence": "1", "filing_url": "u", "found_at": "2026-05-26 20:00:00",
+         "markdown": "x", "markdown_status": "done", "filing_metadata": '{"filed_at":"20260526190000"}'},
+    ])
+    assert [r["accession"] for r in db.recent_ex10()] == ["hasfiled", "nofiled"]

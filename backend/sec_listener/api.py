@@ -188,7 +188,7 @@ def _summary(row: dict) -> dict:
         "filing_url": row.get("filing_url"),
         "found_at": row.get("found_at"),
         "markdown_status": row.get("markdown_status"),
-        "excerpt": clean_excerpt(md, 280),
+        "excerpt": clean_excerpt(md, 520),  # enough to fill ~4 lines; CSS clamps
         "has_markdown": bool(md),
         # Compact filing header for card footers (company, period of report, items).
         "company_name": filing.get("company_name", ""),
