@@ -22,5 +22,11 @@
   "vars": {
     "SEC_API_URL": "https://arthrod-sec-ex10-api.hf.space"
   },
+  // Public custom domain (the arthur.law zone is already on this Cloudflare
+  // account). `wrangler deploy` provisions the hostname + edge cert; no manual
+  // DNS record needed for a Workers custom domain.
+  "routes": [
+    { "pattern": "contracts-live.arthur.law", "custom_domain": true }
+  ],
   "observability": { "enabled": true }
 }
