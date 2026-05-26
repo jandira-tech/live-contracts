@@ -1,18 +1,16 @@
 import { defineConfig, envField } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
-import pagefind from 'astro-pagefind';
 
 // Astro 6 hybrid: server output by default, individual pages opt into
 // prerendering via `export const prerender = true`. Deployed to Cloudflare
 // Workers; the CDN caches responses (Cache-Control + stale-while-revalidate set
 // per-route and at the API origin).
 export default defineConfig({
-  site: 'https://sec-ex10.example.workers.dev',
+  site: 'https://contracts-live.arthur.law',
   output: 'server',
   adapter: cloudflare({
     imageService: 'passthrough',
   }),
-  integrations: [pagefind()],
   env: {
     schema: {
       // Internal FastAPI origin — reachable only from the Worker (private network
@@ -20,7 +18,7 @@ export default defineConfig({
       SEC_API_URL: envField.string({
         context: 'server',
         access: 'secret',
-        default: 'http://127.0.0.1:8799',
+        default: 'https://arthrod-sec-ex10-api.hf.space',
       }),
       SEC_API_KEY: envField.string({
         context: 'server',
