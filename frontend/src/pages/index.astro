@@ -1,6 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
-import AgreementCard from '../components/AgreementCard.astro';
+import AgreementRow from '../components/AgreementRow.astro';
 import { getLiveCollection } from 'astro:content';
 import { ex10Stats, type Ex10Summary } from '../lib/api';
 
@@ -30,10 +30,15 @@ const stats = await ex10Stats();
     <hr class="divider" />
   </header>
 
-  <div class="stats-strip">
-    <span><strong>{stats.total.toLocaleString()}</strong> total</span>
-    <span><strong>{stats.last_24h.toLocaleString()}</strong> in last 24h</span>
-    <span><strong>{stats.with_markdown.toLocaleString()}</strong> with markdown</span>
+  <div class="sl-stats">
+    <div><span class="num">{stats.total.toLocaleString()}</span><span class="label">Total agreements</span></div>
+    <div><span class="num">{stats.last_24h.toLocaleString()}</span><span class="label">Filed in last 24h</span></div>
+    <div><span class="num">{stats.with_markdown.toLocaleString()}</span><span class="label">With markdown extract</span></div>
+  </div>
+
+  <div class="sl-section-bar">
+    <span class="title">▎New agreements</span>
+    <span class="meta">last {WINDOW}s · {items.length} shown</span>
   </div>
 
   {error ? (
@@ -41,14 +46,12 @@ const stats = await ex10Stats();
   ) : items.length === 0 ? (
     <div class="empty">No new EX-10 agreements in the last {WINDOW} seconds. Watching the wire…</div>
   ) : (
-    <div class="grid">
-      {items.map((item) => <AgreementCard item={item} />)}
-    </div>
+    <section class="sl-feed">
+      {items.map((item) => <AgreementRow item={item} />)}
+    </section>
   )}
 
-  <div class="pagination">
-    <a href="/agreements/1">Browse all agreements →</a>
-  </div>
+  <a class="sl-tail-link" href="/agreements/1">Browse all agreements →</a>
 
   <script>
     // Tick the hero countdown down to the next meta-refresh.
