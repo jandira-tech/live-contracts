@@ -1,6 +1,6 @@
 ---
 import Base from '../../layouts/Base.astro';
-import AgreementCard from '../../components/AgreementCard.astro';
+import AgreementRow from '../../components/AgreementRow.astro';
 import { listEx10 } from '../../lib/api';
 
 // Live SSR (no prerender): request-time fetch from the API, paginated. Fresh on
@@ -25,17 +25,19 @@ const next = pageParam < lastPage ? pageParam + 1 : null;
 Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
 ---
 <Base title={`Agreements — page ${pageParam}`}>
-  <section class="hero">
+  <header class="sl-hero">
+    <div class="sl-hero-eyebrow"><span>ARCHIVE</span><span class="sep">·</span><span>page {pageParam} of {lastPage}</span></div>
     <h1>All EX-10 agreements</h1>
-    <p>{(result.total ?? 0).toLocaleString()} material contract exhibits · page {pageParam} of {lastPage}</p>
-  </section>
+    <p class="lede">{(result.total ?? 0).toLocaleString()} material contract exhibits, newest first.</p>
+    <hr class="divider" />
+  </header>
 
   {result.items.length === 0 ? (
     <div class="empty">No agreements available right now.</div>
   ) : (
-    <div class="grid">
-      {result.items.map((item) => <AgreementCard item={item} />)}
-    </div>
+    <section class="sl-feed">
+      {result.items.map((item) => <AgreementRow item={item} />)}
+    </section>
   )}
 
   <nav class="pagination" aria-label="Pagination">
