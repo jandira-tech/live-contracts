@@ -8,3 +8,20 @@ wheels/
 
 # Virtual environments
 .venv
+node_modules/
+
+# Runtime artifacts (must not churn git)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+*.pid
+ex10_exhibits_export.json
+
+# Astro / Cloudflare build output
+frontend/dist/
+frontend/.astro/
+.wrangler/
+.dev.vars
+

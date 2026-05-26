@@ -1,0 +1,205 @@
+"""SQLite data-access layer for the SEC EX-10 listener.
+
+Centralises schema creation, idempotent migrations (notably the ``markdown``
+column added in v0.2), and the queries the listener, worker and API share.
+All connections use WAL mode so the listener can write while the API reads.
+"""
+from __future__ import annotations
+
+import sqlite3
+from typing import Any
+
+EX10_COLUMNS = (
+    "accession",
+    "cik",
+    "form_type",
+    "doc_type",
+    "filename",
+    "description",
+    "sequence",
+    "filing_url",
+)
+
+
+class Database:
+    def __init__(self, path: str = "ex10_listener.db"):
+        self.path = path
+
+    # --- connection helpers -------------------------------------------------
+    def connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
+
+    def column_names(self, table: str) -> list[str]:
+        with self.connect() as conn:
+            return [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+
+    # --- schema -------------------------------------------------------------
+    def init(self) -> None:
+        with self.connect() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS seen_accessions (
+                    accession TEXT PRIMARY KEY,
+                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    form_type TEXT,
+                    cik TEXT
+                );
+                CREATE TABLE IF NOT EXISTS ex10_exhibits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    accession TEXT,
+                    cik TEXT,
+                    form_type TEXT,
+                    doc_type TEXT,
+                    filename TEXT,
+                    description TEXT,
+                    sequence TEXT,
+                    filing_url TEXT,
+                    found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(accession, doc_type, filename)
+                );
+                CREATE TABLE IF NOT EXISTS all_exhibits (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    accession TEXT, cik TEXT, form_type TEXT, doc_type TEXT,
+                    filename TEXT, description TEXT, sequence TEXT, filing_url TEXT,
+                    found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS rss_entries (
+                    accession TEXT PRIMARY KEY,
+                    cik TEXT, form_type TEXT, filing_date TEXT, rss_summary TEXT,
+                    processed BOOLEAN DEFAULT FALSE,
+                    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+            self._ensure_column(conn, "ex10_exhibits", "markdown", "TEXT")
+            self._ensure_column(conn, "ex10_exhibits", "markdown_status", "TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ex10_found_at ON ex10_exhibits(found_at)"
+            )
+            conn.commit()
+
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+        existing = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+    # --- writes -------------------------------------------------------------
+    def save_ex10_exhibit(self, exhibit: dict[str, Any], markdown: str | None = None) -> None:
+        status = "done" if markdown else "pending"
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO ex10_exhibits
+                (accession, cik, form_type, doc_type, filename, description,
+                 sequence, filing_url, markdown, markdown_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    exhibit.get("accession"),
+                    exhibit.get("cik"),
+                    exhibit.get("form_type"),
+                    exhibit.get("doc_type"),
+                    exhibit.get("filename"),
+                    exhibit.get("description"),
+                    exhibit.get("sequence"),
+                    exhibit.get("url") or exhibit.get("filing_url"),
+                    markdown,
+                    status,
+                ),
+            )
+            conn.commit()
+
+    def save_all_exhibit(self, exhibit: dict[str, Any]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO all_exhibits
+                (accession, cik, form_type, doc_type, filename, description, sequence, filing_url)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    exhibit.get("accession"),
+                    exhibit.get("cik"),
+                    exhibit.get("form_type"),
+                    exhibit.get("doc_type"),
+                    exhibit.get("filename"),
+                    exhibit.get("description"),
+                    exhibit.get("sequence"),
+                    exhibit.get("url") or exhibit.get("filing_url"),
+                ),
+            )
+            conn.commit()
+
+    def save_rss_entry(self, accession, cik, form_type, filing_date, summary) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO rss_entries
+                   (accession, cik, form_type, filing_date, rss_summary)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (accession, cik, form_type, filing_date, summary),
+            )
+            conn.commit()
+
+    def is_accession_seen(self, accession: str) -> bool:
+        with self.connect() as conn:
+            return (
+                conn.execute(
+                    "SELECT 1 FROM seen_accessions WHERE accession = ?", (accession,)
+                ).fetchone()
+                is not None
+            )
+
+    def mark_accession_seen(self, accession, form_type, cik) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO seen_accessions (accession, form_type, cik) VALUES (?, ?, ?)",
+                (accession, form_type, cik),
+            )
+            conn.commit()
+
+    def update_markdown(self, exhibit_id: int, markdown: str, status: str = "done") -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE ex10_exhibits SET markdown = ?, markdown_status = ? WHERE id = ?",
+                (markdown, status, exhibit_id),
+            )
+            conn.commit()
+
+    # --- reads --------------------------------------------------------------
+    def recent_ex10(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM ex10_exhibits
+                   ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
+                (limit, offset),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_ex10(self) -> int:
+        with self.connect() as conn:
+            return conn.execute("SELECT COUNT(*) FROM ex10_exhibits").fetchone()[0]
+
+    def ex10_since(self, seconds: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM ex10_exhibits
+                   WHERE found_at >= datetime('now', ?)
+                   ORDER BY found_at DESC, id DESC""",
+                (f"-{int(seconds)} seconds",),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def exhibits_missing_markdown(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM ex10_exhibits
+                   WHERE markdown IS NULL OR markdown = ''
+                   ORDER BY found_at DESC, id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
