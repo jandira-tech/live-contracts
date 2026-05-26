@@ -83,6 +83,12 @@ class Database:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ex10_found_at ON ex10_exhibits(found_at)"
             )
+            # Expression index backing the filed_at ORDER BY (avoids a JSON parse +
+            # filesort per row as the table grows).
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ex10_filed_at "
+                "ON ex10_exhibits(json_extract(filing_metadata, '$.filed_at'))"
+            )
             conn.commit()
 
     @staticmethod

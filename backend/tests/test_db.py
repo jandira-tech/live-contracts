@@ -267,3 +267,12 @@ def test_recent_ex10_filed_at_nulls_sink_below_filed(db):
          "markdown": "x", "markdown_status": "done", "filing_metadata": '{"filed_at":"20260526190000"}'},
     ])
     assert [r["accession"] for r in db.recent_ex10()] == ["hasfiled", "nofiled"]
+
+
+def test_filed_at_expression_index_created(db):
+    # An expression index backs the filed_at ORDER BY (avoids JSON parse per row).
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_ex10_filed_at'"
+        ).fetchone()
+    assert row is not None and "filed_at" in row[0]
