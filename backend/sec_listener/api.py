@@ -184,6 +184,8 @@ def _summary(row: dict) -> dict:
         "period": filing.get("period", ""),
         "location": filing.get("location", ""),
         "items": filing.get("items", []),
+        # Actual SEC acceptance time (ET, "YYYYMMDDHHMMSS"); "" until backfilled.
+        "filed_at": filing.get("filed_at", ""),
     }
 
 

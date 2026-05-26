@@ -38,6 +38,7 @@ export interface Ex10Summary {
   period?: string;
   location?: string;
   items?: string[];
+  filed_at?: string; // SEC acceptance datetime "YYYYMMDDHHMMSS" (ET); "" until backfilled
 }
 
 export interface Ex10Detail extends Ex10Summary {
