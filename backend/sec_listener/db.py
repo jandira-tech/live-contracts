@@ -171,11 +171,19 @@ class Database:
             conn.commit()
 
     # --- reads --------------------------------------------------------------
+    # List/search payloads only need a short excerpt, so we truncate the markdown
+    # column in SQL (SUBSTR) instead of loading multi-MB contract bodies into
+    # memory per row — important on small hosts. Detail reads use SELECT *.
+    _SUMMARY_COLS = (
+        "id, accession, cik, form_type, doc_type, filename, description, sequence, "
+        "filing_url, found_at, markdown_status, SUBSTR(markdown, 1, 2000) AS markdown"
+    )
+
     def recent_ex10(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
-                """SELECT * FROM ex10_exhibits
-                   ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
+                f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
+                    ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
                 (limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -187,9 +195,9 @@ class Database:
     def ex10_since(self, seconds: int) -> list[dict[str, Any]]:
         with self.connect() as conn:
             rows = conn.execute(
-                """SELECT * FROM ex10_exhibits
-                   WHERE found_at >= datetime('now', ?)
-                   ORDER BY found_at DESC, id DESC""",
+                f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
+                    WHERE found_at >= datetime('now', ?)
+                    ORDER BY found_at DESC, id DESC""",
                 (f"-{int(seconds)} seconds",),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -222,17 +230,24 @@ class Database:
             "by_form_type": {r[0]: r[1] for r in by_form},
         }
 
+    @staticmethod
+    def _like_term(query: str) -> str:
+        """Escape LIKE wildcards so user-typed % and _ match literally."""
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
+
     def search(self, query: str, limit: int = 20, offset: int = 0) -> list[dict[str, Any]]:
         """Case-insensitive substring search over description + markdown."""
         q = (query or "").strip()
         if not q:
             return []
-        like = f"%{q}%"
+        like = self._like_term(q)
         with self.connect() as conn:
             rows = conn.execute(
-                """SELECT * FROM ex10_exhibits
-                   WHERE description LIKE ? COLLATE NOCASE OR markdown LIKE ? COLLATE NOCASE
-                   ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
+                f"""SELECT {self._SUMMARY_COLS} FROM ex10_exhibits
+                    WHERE description LIKE ? ESCAPE '\\' COLLATE NOCASE
+                       OR markdown LIKE ? ESCAPE '\\' COLLATE NOCASE
+                    ORDER BY found_at DESC, id DESC LIMIT ? OFFSET ?""",
                 (like, like, limit, offset),
             ).fetchall()
         return [dict(r) for r in rows]
@@ -241,11 +256,12 @@ class Database:
         q = (query or "").strip()
         if not q:
             return 0
-        like = f"%{q}%"
+        like = self._like_term(q)
         with self.connect() as conn:
             return conn.execute(
                 """SELECT COUNT(*) FROM ex10_exhibits
-                   WHERE description LIKE ? COLLATE NOCASE OR markdown LIKE ? COLLATE NOCASE""",
+                   WHERE description LIKE ? ESCAPE '\\' COLLATE NOCASE
+                      OR markdown LIKE ? ESCAPE '\\' COLLATE NOCASE""",
                 (like, like),
             ).fetchone()[0]
 

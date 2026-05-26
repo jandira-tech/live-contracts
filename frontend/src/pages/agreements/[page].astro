@@ -12,7 +12,7 @@ if (!Number.isInteger(pageParam) || pageParam < 1) {
 
 const PAGE_SIZE = 12;
 const result = await listEx10(pageParam, PAGE_SIZE);
-const lastPage = Math.max(1, result.total_pages);
+const lastPage = Math.max(1, result.total_pages ?? 0);
 
 if (pageParam > lastPage && result.total > 0) {
   return Astro.redirect(`/agreements/${lastPage}`);
@@ -27,7 +27,7 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-rev
 <Base title={`Agreements — page ${pageParam}`}>
   <section class="hero">
     <h1>All EX-10 agreements</h1>
-    <p>{result.total.toLocaleString()} material contract exhibits · page {pageParam} of {lastPage}</p>
+    <p>{(result.total ?? 0).toLocaleString()} material contract exhibits · page {pageParam} of {lastPage}</p>
   </section>
 
   {result.items.length === 0 ? (

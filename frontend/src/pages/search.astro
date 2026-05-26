@@ -11,7 +11,7 @@ const page = Math.max(1, Number(url.searchParams.get('page') ?? '1') || 1);
 const PAGE_SIZE = 12;
 
 const result = q ? await ex10Search(q, page, PAGE_SIZE) : null;
-const lastPage = result ? Math.max(1, result.total_pages) : 1;
+const lastPage = result ? Math.max(1, result.total_pages ?? 0) : 1;
 const prev = result && page > 1 ? page - 1 : null;
 const next = result && page < lastPage ? page + 1 : null;
 const qs = (p: number) => `/search?q=${encodeURIComponent(q)}&page=${p}`;
@@ -30,7 +30,7 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-rev
 
   {result && (
     <>
-      <p class="search-meta">{result.total.toLocaleString()} result{result.total === 1 ? '' : 's'} for “{q}”</p>
+      <p class="search-meta">{(result.total ?? 0).toLocaleString()} result{result.total === 1 ? '' : 's'} for “{q}”</p>
       {result.items.length === 0 ? (
         <div class="empty">No matches. Try a different term.</div>
       ) : (
@@ -38,7 +38,7 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-rev
           {result.items.map((item) => <AgreementCard item={item} />)}
         </div>
       )}
-      {result.total_pages > 1 && (
+      {lastPage > 1 && (
         <nav class="pagination" aria-label="Pagination">
           {prev ? <a href={qs(prev)}>‹ Prev</a> : <span class="disabled">‹ Prev</span>}
           <span class="current">{page} / {lastPage}</span>

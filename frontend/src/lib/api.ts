@@ -44,7 +44,12 @@ function headers(): Record<string, string> {
 
 async function getJson<T>(path: string, fallback: T): Promise<T> {
   try {
-    const res = await fetch(`${SEC_API_URL}${path}`, { headers: headers() });
+    // Bounded timeout so a slow/cold backend can't hang the Worker request;
+    // we degrade to the fallback and let the next request (or refresh) retry.
+    const res = await fetch(`${SEC_API_URL}${path}`, {
+      headers: headers(),
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) return fallback;
     return (await res.json()) as T;
   } catch {
