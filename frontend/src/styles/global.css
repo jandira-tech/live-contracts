@@ -192,14 +192,16 @@ footer.site { border-top: 1px solid var(--border); color: var(--text-secondary);
   display: flex; justify-content: space-between; align-items: baseline;
   padding: 1rem 0 0.4rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
 }
-.sl-section-bar .title { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); }
+.sl-section-bar .title { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); display: inline-flex; align-items: center; gap: 0.4rem; }
+/* Vertical accent bar via pseudo-element (was a raw ▎ glyph — inconsistent across UAs / screen readers). */
+.sl-section-bar .title::before { content: ''; display: inline-block; width: 3px; height: 0.85em; background: currentColor; }
 .sl-section-bar .meta { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-secondary); }
 
 /* ---------- Live feed — hairline-separated rows ---------- */
 .sl-feed { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .sl-row {
   display: grid; grid-template-columns: 180px 1fr; gap: 2rem;
-  padding: 1.5rem 0 1.5rem 0.9rem; border-bottom: 1px solid var(--border);
+  padding: 1.5rem 0.9rem; border-bottom: 1px solid var(--border);
   position: relative; color: inherit; transition: background var(--t-fast);
 }
 .sl-row:last-child { border-bottom: 0; }
