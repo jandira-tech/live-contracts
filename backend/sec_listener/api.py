@@ -11,6 +11,7 @@ edge can serve cached data instantly while revalidating in the background.
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import re
@@ -106,7 +107,9 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
         if row is None:
             raise HTTPException(status_code=404, detail="exhibit not found")
         response.headers["Cache-Control"] = _DETAIL_CACHE
-        return dict(row)
+        out = dict(row)
+        out["filing"] = _parse_filing(out.get("filing_metadata"))
+        return out
 
     return app
 
@@ -135,9 +138,21 @@ def clean_excerpt(text: str | None, limit: int = 280) -> str:
     return cut.rstrip() + "…"
 
 
+def _parse_filing(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        val = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    # Valid JSON that isn't an object (list/str/number) would break downstream .get().
+    return val if isinstance(val, dict) else {}
+
+
 def _summary(row: dict) -> dict:
     """List payload: metadata + a short excerpt, not the full markdown body."""
     md = row.get("markdown") or ""
+    filing = _parse_filing(row.get("filing_metadata"))
     return {
         "id": row.get("id"),
         "accession": row.get("accession"),
@@ -151,6 +166,11 @@ def _summary(row: dict) -> dict:
         "markdown_status": row.get("markdown_status"),
         "excerpt": clean_excerpt(md, 280),
         "has_markdown": bool(md),
+        # Compact filing header for card footers (company, period of report, items).
+        "company_name": filing.get("company_name", ""),
+        "period": filing.get("period", ""),
+        "location": filing.get("location", ""),
+        "items": filing.get("items", []),
     }
 
 

@@ -2,6 +2,7 @@
 import Base from '../../layouts/Base.astro';
 import { getLiveEntry } from 'astro:content';
 import type { Ex10Detail } from '../../lib/api';
+import { formatNY, formatYmd } from '../../lib/time';
 import { marked } from 'marked';
 
 // Live SSR via Live Content Collections: fetched at request time by id. No
@@ -9,34 +10,59 @@ import { marked } from 'marked';
 const { id } = Astro.params;
 const { entry, error } = await getLiveEntry('agreements', { id: id! });
 
-if (error || !entry) {
+const detail = entry?.data as Ex10Detail | undefined;
+if (error || !detail) {
   return Astro.redirect('/404');
 }
 
-const detail = entry.data as Ex10Detail;
 const html = detail.markdown ? marked.parse(detail.markdown) : '';
 const title = detail.description?.trim() || `${detail.doc_type} — ${detail.filename}`;
+const f = detail.filing ?? {};
+const hasFiling = Boolean(f.company_name || f.period || f.file_number || (f.items?.length));
 
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 ---
 <Base title={title} description={`EX-10 material contract: ${title}`}>
-  <section class="hero">
-    <div class="meta" style="display:flex;gap:.5rem;flex-wrap:wrap;font-family:var(--mono);font-size:.78rem;color:var(--muted);margin-bottom:.5rem">
-      <span class="badge ex10">{detail.doc_type}</span>
-      <span class="badge form">{detail.form_type}</span>
-      <span class="badge">CIK {detail.cik}</span>
-      <span class="badge">{detail.accession}</span>
+  <header class="sl-hero">
+    <div class="sl-hero-eyebrow">
+      <span class="sl-ex-tag">{detail.doc_type}</span>
+      <span>{detail.form_type}</span>
+      <span class="sep">·</span>
+      <span>CIK {detail.cik}</span>
+      <span class="sep">·</span>
+      <span>{detail.accession}</span>
     </div>
     <h1>{title}</h1>
-    <p>
+    <p class="lede">
       <a href={detail.filing_url} rel="noopener" target="_blank">View original filing on SEC EDGAR →</a>
-      &nbsp;·&nbsp; seen {detail.found_at} UTC
+      &nbsp;·&nbsp; seen {formatNY(detail.found_at)}
     </p>
-  </section>
+    <hr class="divider" />
+  </header>
+
+  {hasFiling && (
+    <section class="filing-details">
+      <h2>FILING DETAILS</h2>
+      <dl>
+        {f.company_name ? <><dt>Filer</dt><dd>{f.company_name}</dd></> : null}
+        {f.period ? <><dt>Period of report</dt><dd>{formatYmd(f.period)}</dd></> : null}
+        {f.filing_date ? <><dt>Filed</dt><dd>{formatYmd(f.filing_date)}</dd></> : null}
+        {f.file_number ? <><dt>SEC file no.</dt><dd>{f.file_number}</dd></> : null}
+        {f.state_of_incorporation ? <><dt>State of inc.</dt><dd>{f.state_of_incorporation}</dd></> : null}
+        {f.sic ? <><dt>SIC</dt><dd>{f.sic}</dd></> : null}
+        {f.location ? <><dt>Location</dt><dd>{f.location}</dd></> : null}
+      </dl>
+      {f.items?.length ? (
+        <ul class="items">
+          {f.items.map((it) => <li>{it}</li>)}
+        </ul>
+      ) : null}
+    </section>
+  )}
 
   <article class="prose">
     {html ? <Fragment set:html={html} /> : <p class="empty">Markdown for this exhibit is still being generated.</p>}
   </article>
 
-  <div class="pagination"><a href="/agreements/1">← Back to all agreements</a></div>
+  <a class="sl-tail-link" href="/agreements/1">← Back to all agreements</a>
 </Base>

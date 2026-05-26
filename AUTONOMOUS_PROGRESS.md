@@ -36,7 +36,15 @@ key-gated; CF caches it at the edge.
 6✅ live collections  7✅ pagination (live SSR)  8↔ search now live /api/search
 (Pagefind dropped per "fully live" choice)  9✅ wrangler deploy  10✅ autonomous
 
-## Loop behaviour on re-entry (MAINTENANCE MODE — UPDATED)
+## Verified 2026-05-26 ~15:41Z
+Backend refreshing confirmed: HF Space captured a new EX-10 live (801→802,
+"exhibit101facilityagreem.htm"); ~50-60 filings processed per ~2.5-min poll cycle.
+EX-10s are sparse and MORNING-heavy (a few/day, mostly AM ET) — daytime gaps are
+NORMAL, not a fault. Poll interval 60s (cycle ~2min: paginates ~33 feed pages).
+Review fixes shipped: search wildcard-escaping + SUBSTR(markdown) truncation,
+8s fetch timeout, NYC time display, build-context CI guard. PR #12.
+
+## Loop behaviour on re-entry (MAINTENANCE MODE — 30min cadence)
 Build DONE. Do NOT rebuild/redeploy for content (site is fully live). Each wake:
 1. Health-check HF Space: `curl -s https://arthrod-sec-ex10-api.hf.space/health`
    (expect {"status":"ok",...}). If PAUSED/SLEEPING, the HF free tier sleeps after

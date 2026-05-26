@@ -61,6 +61,31 @@ def test_api_search_endpoint(db):
     assert "stale-while-revalidate" in r.headers.get("cache-control", "")
 
 
+def test_search_escapes_sql_wildcards(db):
+    # Only one row literally contains a percent sign.
+    _add(db, "p-1", "EX-10.1", "Interest at 50% per annum", "body")
+    _add(db, "p-2", "EX-10.2", "Plain agreement", "no special chars")
+    _add(db, "p-3", "EX-10.3", "Another deal", "underscore_free text")
+
+    # A bare "%" must match only the row containing a literal "%", not everything.
+    res = db.search("%", limit=50, offset=0)
+    assert [r["accession"] for r in res] == ["p-1"]
+    assert db.search_count("%") == 1
+
+    # "_" must be treated literally too (matches the underscore row only).
+    res = db.search("underscore_free", limit=50, offset=0)
+    assert [r["accession"] for r in res] == ["p-3"]
+
+
+def test_search_truncates_markdown_payload(db):
+    big = "x" * 50000
+    _add(db, "big-1", "EX-10.1", "Huge contract", big)
+    res = db.search("Huge", limit=10, offset=0)
+    assert len(res) == 1
+    # Search results are for previews — markdown must be truncated, not the full blob.
+    assert len(res[0]["markdown"]) <= 2000
+
+
 def test_api_search_blank_query_returns_empty(db):
     _add(db, "a-1", "EX-10.1", "Credit Agreement", "x")
     client = TestClient(create_app(db, api_key=None))
