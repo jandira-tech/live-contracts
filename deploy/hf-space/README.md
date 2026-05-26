@@ -37,6 +37,4 @@ One process (`python -m sec_listener.worker`) = SEC listener + Markdown backfill
 - Ships with a seed database for instant content; new filings stream in
   continuously. Enable persistent storage (mount `/data`, set
   `SEC_DB_PATH=/data/ex10_listener.db`) to retain data across restarts.
-- Cloudflare Tunnel is **not** used — Hugging Face bans `cloudflared` on Spaces,
-  and HF already provides the public HTTPS endpoint.
-- Public SEC filing data only. Not legal/investment advice.
+- Public SEC filing data only. Not legal/investment advice. Not affiliated with the SEC.
