@@ -9,7 +9,10 @@ import { ex10Stats, type Ex10Summary } from '../lib/api';
 // contracts the backend has captured.
 const WINDOW = 60;
 const { entries, error } = await getLiveCollection('agreements', { filter: { seconds: WINDOW } });
-const items: Ex10Summary[] = (entries ?? []).map((e) => e.data as Ex10Summary);
+// getLiveCollection re-sorts entries by id; force newest-first for the live feed.
+const items: Ex10Summary[] = (entries ?? [])
+  .map((e) => e.data as Ex10Summary)
+  .sort((a, b) => (b.found_at ?? '').localeCompare(a.found_at ?? '') || (b.id - a.id));
 const stats = await ex10Stats();
 ---
 <Base refreshSeconds={WINDOW}>
