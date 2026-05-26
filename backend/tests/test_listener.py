@@ -24,7 +24,7 @@ def test_process_new_filing_saves_ex10_with_markdown(listener):
         ex10 = [{"type": "EX-10.1", "filename": "a.htm", "description": "Contract",
                  "sequence": "2", "content": b"<h1>Deal</h1><p>terms</p>"}]
         other = [{"type": "EX-99.1", "filename": "p.htm", "description": "", "sequence": "3"}]
-        return ex10, other, "https://sec.gov/x.txt"
+        return ex10, other, "https://sec.gov/x.txt", {"company_name": "Acme Corp", "period": "20260519"}
 
     listener.extractor = extractor
     ex10_count, other_count = listener.process_filing(_filing())
@@ -35,6 +35,8 @@ def test_process_new_filing_saves_ex10_with_markdown(listener):
     assert len(rows) == 1
     assert "Deal" in rows[0]["markdown"]
     assert rows[0]["filing_url"] == "https://sec.gov/x.txt"
+    import json
+    assert json.loads(rows[0]["filing_metadata"])["company_name"] == "Acme Corp"
 
 
 def test_already_seen_filing_is_skipped(listener):
@@ -43,7 +45,7 @@ def test_already_seen_filing_is_skipped(listener):
 
     def extractor(accession, cik):
         called["n"] += 1
-        return [], [], "u"
+        return [], [], "u", {}
 
     listener.extractor = extractor
     out = listener.process_filing(_filing(acc="dup-1"))
@@ -54,7 +56,7 @@ def test_already_seen_filing_is_skipped(listener):
 def test_ex10_without_content_saved_with_empty_markdown(listener):
     def extractor(accession, cik):
         return [{"type": "EX-10.2", "filename": "n.htm", "description": "",
-                 "sequence": "1", "content": None}], [], "u"
+                 "sequence": "1", "content": None}], [], "u", {}
 
     listener.extractor = extractor
     listener.process_filing(_filing(acc="0001-26-000009"))

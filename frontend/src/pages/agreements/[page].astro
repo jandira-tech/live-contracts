@@ -1,0 +1,50 @@
+---
+import Base from '../../layouts/Base.astro';
+import AgreementRow from '../../components/AgreementRow.astro';
+import { listEx10 } from '../../lib/api';
+
+// Live SSR (no prerender): request-time fetch from the API, paginated. Fresh on
+// every request — no rebuild, no redeploy needed when new agreements arrive.
+const pageParam = Number(Astro.params.page);
+if (!Number.isInteger(pageParam) || pageParam < 1) {
+  return Astro.redirect('/agreements/1');
+}
+
+const PAGE_SIZE = 12;
+const result = await listEx10(pageParam, PAGE_SIZE);
+const lastPage = Math.max(1, result.total_pages ?? 0);
+
+if (pageParam > lastPage && result.total > 0) {
+  return Astro.redirect(`/agreements/${lastPage}`);
+}
+
+const prev = pageParam > 1 ? pageParam - 1 : null;
+const next = pageParam < lastPage ? pageParam + 1 : null;
+
+// Edge cache: serve instantly, revalidate in the background.
+Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+---
+<Base title={`Agreements — page ${pageParam}`}>
+  <header class="sl-hero">
+    <div class="sl-hero-eyebrow"><span>ARCHIVE</span><span class="sep">·</span><span>page {pageParam} of {lastPage}</span></div>
+    <h1>All EX-10 agreements</h1>
+    <p class="lede">{(result.total ?? 0).toLocaleString()} material contract exhibits, newest first.</p>
+    <hr class="divider" />
+  </header>
+
+  {result.items.length === 0 ? (
+    <div class="empty">No agreements available right now.</div>
+  ) : (
+    <section class="sl-feed">
+      {result.items.map((item) => <AgreementRow item={item} />)}
+    </section>
+  )}
+
+  <nav class="pagination" aria-label="Pagination">
+    {pageParam > 1 ? <a href="/agreements/1">« First</a> : <span class="disabled">« First</span>}
+    {prev ? <a href={`/agreements/${prev}`}>‹ Prev</a> : <span class="disabled">‹ Prev</span>}
+    <span class="current">{pageParam} / {lastPage}</span>
+    {next ? <a href={`/agreements/${next}`}>Next ›</a> : <span class="disabled">Next ›</span>}
+    {pageParam < lastPage ? <a href={`/agreements/${lastPage}`}>Last »</a> : <span class="disabled">Last »</span>}
+  </nav>
+</Base>

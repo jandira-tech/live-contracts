@@ -12,6 +12,10 @@ def test_defaults_when_no_env(monkeypatch):
     assert cfg.requests_per_second == 5
     assert cfg.convert_markdown is True
     assert "sec" in cfg.user_agent.lower()
+    assert cfg.api_host == "127.0.0.1"
+    assert cfg.api_port == 8799
+    assert cfg.serve_api is False
+    assert cfg.api_key is None
 
 
 def test_reads_overrides_from_env(monkeypatch):
@@ -20,12 +24,20 @@ def test_reads_overrides_from_env(monkeypatch):
     monkeypatch.setenv("SEC_RUN_HOURS", "0")  # 0 => run forever
     monkeypatch.setenv("SEC_RPS", "8")
     monkeypatch.setenv("SEC_CONVERT_MARKDOWN", "false")
+    monkeypatch.setenv("SEC_SERVE_API", "true")
+    monkeypatch.setenv("SEC_API_HOST", "0.0.0.0")
+    monkeypatch.setenv("SEC_API_PORT", "9001")
+    monkeypatch.setenv("SEC_API_KEY", "topsecret")
     cfg = Config.from_env()
     assert cfg.db_path == "/tmp/custom.db"
     assert cfg.poll_interval == 15
     assert cfg.run_duration_hours == 0
     assert cfg.requests_per_second == 8
     assert cfg.convert_markdown is False
+    assert cfg.serve_api is True
+    assert cfg.api_host == "0.0.0.0"
+    assert cfg.api_port == 9001
+    assert cfg.api_key == "topsecret"
 
 
 def test_min_request_interval_derived_from_rps(monkeypatch):
@@ -42,4 +54,8 @@ _ENV_KEYS = (
     "SEC_CONVERT_MARKDOWN",
     "SEC_USER_AGENT",
     "SEC_ALERT_FILE",
+    "SEC_SERVE_API",
+    "SEC_API_HOST",
+    "SEC_API_PORT",
+    "SEC_API_KEY",
 )
