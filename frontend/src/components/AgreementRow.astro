@@ -1,18 +1,16 @@
 ---
 import type { Ex10Summary } from '../lib/api';
-import { formatNY, formatYmd, formatFiledAt } from '../lib/time';
+import { formatNY, formatFiledAt } from '../lib/time';
 
 interface Props { item: Ex10Summary; }
 const { item } = Astro.props;
 
 const title = item.description?.trim() || `${item.doc_type} — ${item.filename}`;
-const period = formatYmd(item.period);
 // Every exhibit is EX-10.*, so the filer (company) is the useful headline pill;
 // fall back to the doc type only when the filing header hasn't been parsed yet.
 const pill = item.company_name?.trim() || item.doc_type;
-// Prefer the real SEC acceptance time; fall back to our capture time until backfilled.
-const filed = formatFiledAt(item.filed_at);
-const filedLabel = filed ? `FILED ${filed}` : `filed/seen ${formatNY(item.found_at)}`;
+// The real SEC acceptance time; fall back to our capture time until backfilled.
+const filedLabel = `FILED ${formatFiledAt(item.filed_at) || formatNY(item.found_at)}`;
 ---
 <a class="sl-row" href={`/agreement/${item.id}`}>
   <div class="sl-row-meta">
@@ -25,9 +23,11 @@ const filedLabel = filed ? `FILED ${filed}` : `filed/seen ${formatNY(item.found_
   <div class="sl-row-body">
     <h3>{title}</h3>
     {item.excerpt ? <p class="excerpt">{item.excerpt}</p> : null}
+    {!item.excerpt && item.image_urls?.length ? (
+      <p class="scanned">📄 Scanned document · {item.image_urls.length} page{item.image_urls.length === 1 ? '' : 's'}</p>
+    ) : null}
     <div class="filed">
       <span>{filedLabel}</span>
-      {period ? <><span>·</span><span>period {period}</span></> : null}
     </div>
   </div>
 </a>

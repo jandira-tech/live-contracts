@@ -26,7 +26,7 @@
   // account). `wrangler deploy` provisions the hostname + edge cert; no manual
   // DNS record needed for a Workers custom domain.
   "routes": [
-    { "pattern": "contracts-live.arthur.law", "custom_domain": true }
+    { "pattern": "live-contracts.arthur.law", "custom_domain": true }
   ],
   "observability": { "enabled": true }
 }

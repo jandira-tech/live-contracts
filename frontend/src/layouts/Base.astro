@@ -16,7 +16,6 @@ const {
 
 // Active nav state from the current path.
 const path = Astro.url.pathname;
-const isLive = path === '/';
 const isBrowse = path.startsWith('/agreement'); // /agreements/* and /agreement/*
 const isSearch = path.startsWith('/search');
 ---
@@ -37,12 +36,11 @@ const isSearch = path.startsWith('/search');
   <body>
     <nav class="sl-nav">
       <div class="sl-nav-inner">
-        <a class="sl-wordmark" href="/">LIVECONTRACTS</a>
+        <a class="sl-wordmark" href="/"><span class="pulse"></span>LIVECONTRACTS</a>
         <ul class="sl-nav-links">
-          <li><a class:list={['sl-nav-link', { 'is-active': isLive }]} href="/"><span class="live-dot"></span>LIVE</a></li>
+          <li><a class="sl-nav-link" href="https://arthur.law" target="_blank" rel="noopener">ABOUT ME</a></li>
           <li><a class:list={['sl-nav-link', { 'is-active': isBrowse }]} href="/agreements/1">BROWSE</a></li>
           <li><a class:list={['sl-nav-link', { 'is-active': isSearch }]} href="/search">SEARCH</a></li>
-          <li><a class="sl-nav-link" href="https://arthur.law" target="_blank" rel="noopener">ABOUT ME</a></li>
         </ul>
       </div>
     </nav>
@@ -51,9 +49,25 @@ const isSearch = path.startsWith('/search');
     </main>
     <footer class="site">
       <div class="container">
-        Material contract (EX-10) exhibits extracted from SEC EDGAR in near real time.
-        Data is public SEC filing information. Not legal or investment advice.
-        <span class="footer-strong">NOT AFFILIATED WITH THE SEC.</span>
+        <p>
+          Material contract (EX-10) exhibits extracted from SEC EDGAR in near real time.
+          Data is public SEC filing information. Not legal or investment advice.
+          <span class="footer-strong">NOT AFFILIATED WITH THE SEC.</span>
+        </p>
+        <p class="footer-fine">
+          Attorney advertising. This website is for general informational purposes and does not
+          create an attorney-client relationship. Legal services are provided only after conflict
+          checks, engagement terms, and jurisdictional scope are confirmed. Prior results do not
+          guarantee a similar outcome.
+        </p>
+        <div class="footer-meta">
+          <span>© MMXXVI ARTHUR SOUZA RODRIGUES · NEW YORK · SÃO PAULO</span>
+          <nav class="footer-links" aria-label="Social links">
+            <a href="https://huggingface.co/arthrod" target="_blank" rel="noopener noreferrer">HF</a>
+            <a href="https://www.linkedin.com/in/arthrod" target="_blank" rel="noopener noreferrer">LI</a>
+            <a href="https://github.com/arthrod" target="_blank" rel="noopener noreferrer">GH</a>
+          </nav>
+        </div>
       </div>
     </footer>
   </body>

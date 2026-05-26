@@ -17,6 +17,7 @@ if (error || !detail) {
 
 const html = detail.markdown ? marked.parse(detail.markdown) : '';
 const title = detail.description?.trim() || `${detail.doc_type} — ${detail.filename}`;
+const images = detail.image_urls ?? [];
 const f = detail.filing ?? {};
 const hasFiling = Boolean(f.company_name || f.period || f.file_number || (f.items?.length));
 
@@ -60,9 +61,16 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-re
     </section>
   )}
 
-  <article class="prose">
-    {html ? <Fragment set:html={html} /> : <p class="empty">Markdown for this exhibit is still being generated.</p>}
-  </article>
+  {images.length > 0 ? (
+    <section class="sl-gallery">
+      <h2>SCANNED EXHIBIT · {images.length} PAGE{images.length === 1 ? '' : 'S'}</h2>
+      {images.map((src, i) => <img src={src} alt={`Page ${i + 1}`} loading="lazy" />)}
+    </section>
+  ) : (
+    <article class="prose">
+      {html ? <Fragment set:html={html} /> : <p class="empty">Markdown for this exhibit is still being generated.</p>}
+    </article>
+  )}
 
   <a class="sl-tail-link" href="/agreements/1">← Back to all agreements</a>
 </Base>
