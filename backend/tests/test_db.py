@@ -174,3 +174,14 @@ def test_missing_filing_metadata_includes_legacy_rows_without_filed_at(db):
     accs = {m["accession"] for m in db.exhibits_missing_filing_metadata(limit=10)}
     assert "legacy" in accs       # re-fetched to add filed_at
     assert "current" not in accs  # already has filed_at -> skipped
+
+
+def test_missing_filing_metadata_robust_to_filed_at_substring(db):
+    # A field VALUE containing the literal '"filed_at"' must not be mistaken for the key.
+    db.save_ex10_exhibit(
+        {"accession": "tricky", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "t.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="x", filing_metadata={"note": "filed_at"},  # no real filed_at key
+    )
+    accs = {m["accession"] for m in db.exhibits_missing_filing_metadata(limit=10)}
+    assert "tricky" in accs  # still needs backfill (json key absent)

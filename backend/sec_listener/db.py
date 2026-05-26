@@ -292,7 +292,7 @@ class Database:
                 """SELECT id, accession, cik, filename FROM ex10_exhibits
                    WHERE filing_metadata IS NULL
                       OR (filing_metadata <> '{}'
-                          AND filing_metadata NOT LIKE '%"filed_at"%')
+                          AND json_extract(filing_metadata, '$.filed_at') IS NULL)
                    ORDER BY found_at DESC, id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
