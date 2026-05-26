@@ -91,3 +91,19 @@ def test_api_surfaces_filing_fields(tmp_path):
     detail = client.get(f"/api/ex10/{item['id']}").json()
     assert detail["filing"]["company_name"] == "Lamb Weston Holdings, Inc."
     assert detail["filing"]["items"] == ["Entry into a Material Definitive Agreement"]
+
+
+def test_extract_filing_header_tolerates_non_dict_nested():
+    """Malformed SGML may parse nested sections as non-dicts; must not raise."""
+    from sec_listener.parsing import extract_filing_header
+    bad = {
+        "filer": {"company-data": "GARBLED", "filing-values": ["x"], "business-address": 7},
+        "period": "20260519",
+    }
+    out = extract_filing_header(bad)
+    assert out["company_name"] == ""
+    assert out["file_number"] == ""
+    assert out["location"] == ""
+    assert out["period"] == "20260519"
+    # filer itself as a bare string must also be tolerated
+    assert extract_filing_header({"filer": "nope"})["company_name"] == ""
