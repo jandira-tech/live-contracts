@@ -117,7 +117,7 @@ def create_app(db: Database, api_key: str | None = None) -> FastAPI:
 _MD_MARKERS = re.compile(r"\*+|_{2,}|`+|#+|>+|\[|\]|!\[")
 # Image references markitdown emits for scanned exhibits, e.g.
 # `(ex10-3_001.jpg)` or `(exhibit101facilityagreem001.jpg "slide1")`.
-_IMG_REF = re.compile(r"\([^()]*\.(?:jpe?g|png|gif|svg|webp)(?:\s+\"[^\"]*\")?[^()]*\)", re.I)
+_IMG_REF = re.compile(r"\([^()]*\.(?:jpe?g|png|gif|tiff?|svg|webp)(?:\s+\"[^\"]*\")?[^()]*\)", re.I)
 # Leading exhibit label(s) — pure metadata at the START ("Exhibit 10.1", "EX-10.3").
 # Anchored so mid-body references ("...subject to Exhibit 10.2...") are preserved.
 _LEADING_LABEL = re.compile(r"^\s*(?:(?:exhibit|ex)[\s.\-]*\d+(?:\.\d+)?\b\s*)+", re.I)

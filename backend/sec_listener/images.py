@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 DATASET_REPO = "arthrod/sec-ex10-exhibits"
 # Capture the referenced filename from a markdown image ref: (ex10-3_001.jpg) or
 # (exhibit101.jpg "slide1").
-_IMG_REF = re.compile(r"\(\s*([^()\s\"]+\.(?:jpe?g|png|gif|tiff?))(?:\s+\"[^\"]*\")?\s*\)", re.I)
+_IMG_REF = re.compile(r"\(\s*([^()\s\"]+\.(?:jpe?g|png|gif|tiff?|svg|webp))(?:\s+\"[^\"]*\")?\s*\)", re.I)
 
 
 def image_filenames(markdown: str | None) -> list[str]:
@@ -71,15 +71,16 @@ def fetch_graphics(accession: str, cik: str) -> list[tuple[str, bytes]]:
     return out
 
 
-def upload_image(data: bytes, path_in_repo: str, repo: str, token: str) -> None:
-    from huggingface_hub import HfApi
+def upload_images(uploads: list[tuple[bytes, str]], repo: str, token: str) -> None:
+    """Upload all of a filing's images in ONE commit (not one per image)."""
+    from huggingface_hub import CommitOperationAdd, HfApi
 
-    HfApi(token=token).upload_file(
-        path_or_fileobj=data,
-        path_in_repo=path_in_repo,
+    ops = [CommitOperationAdd(path_in_repo=path, path_or_fileobj=data) for data, path in uploads]
+    HfApi(token=token).create_commit(
         repo_id=repo,
         repo_type="dataset",
-        commit_message=f"add exhibit image {path_in_repo}",
+        operations=ops,
+        commit_message=f"add {len(ops)} exhibit image(s)",
     )
 
 
@@ -90,17 +91,27 @@ def capture_images(
     token: str | None,
     repo: str = DATASET_REPO,
     fetcher: Callable[[str, str], list[tuple[str, bytes]]] = fetch_graphics,
-    uploader: Callable[[bytes, str, str, str], None] = upload_image,
+    uploader: Callable[[list[tuple[bytes, str]], str, str], None] = upload_images,
 ) -> list[str]:
-    """Fetch a filing's images, store them in the dataset, return their public URLs.
+    """Fetch a filing's images, store them in the dataset (one commit), return URLs.
 
-    No-op (returns []) without a token, so SQLite/text-only stays the default.
+    No-op (returns []) without a token. Network failures are logged and swallowed
+    so a transient SEC/HF hiccup never crashes the caller.
     """
     if not token:
         return []
-    urls: list[str] = []
-    for filename, data in fetcher(accession, cik):
-        path = dataset_image_path(accession, filename)
-        uploader(data, path, repo, token)
-        urls.append(public_url(repo, path))
-    return urls
+    try:
+        graphics = fetcher(accession, cik)
+        if not graphics:
+            return []
+        uploads: list[tuple[bytes, str]] = []
+        urls: list[str] = []
+        for filename, data in graphics:
+            path = dataset_image_path(accession, filename)
+            uploads.append((data, path))
+            urls.append(public_url(repo, path))
+        uploader(uploads, repo, token)
+        return urls
+    except Exception as exc:  # noqa: BLE001 - transient SEC/HF errors must not crash the worker
+        logger.warning("image capture failed for %s: %s", accession, exc)
+        return []

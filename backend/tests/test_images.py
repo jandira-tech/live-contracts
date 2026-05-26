@@ -36,8 +36,9 @@ def test_capture_images_uploads_and_returns_urls():
     def fake_fetcher(accession, cik):
         return [("ex10-1_001.jpg", b"\xff\xd8jpegbytes"), ("ex10-1_002.jpg", b"\xff\xd8more")]
 
-    def fake_uploader(data, path, repo, token):
-        uploaded.append((path, len(data), repo, token))
+    def fake_uploader(uploads, repo, token):  # bulk: all images in one call
+        for data, path in uploads:
+            uploaded.append((path, len(data), repo, token))
 
     urls = images.capture_images(
         "0001679273-26-000018", "1679273",
@@ -49,6 +50,7 @@ def test_capture_images_uploads_and_returns_urls():
         "https://huggingface.co/datasets/arthrod/sec-ex10-exhibits/resolve/main/images/0001679273-26-000018/ex10-1_002.jpg",
     ]
     assert uploaded[0] == ("images/0001679273-26-000018/ex10-1_001.jpg", 11, "arthrod/sec-ex10-exhibits", "tok")
+    assert len(uploaded) == 2  # both images via a single bulk call
 
 
 def test_capture_images_noop_without_token():
