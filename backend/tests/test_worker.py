@@ -65,7 +65,8 @@ def test_metadata_backfill_fills_missing(db):
     assert len(db.exhibits_missing_filing_metadata(limit=10)) == 2
 
     def meta_fetcher(accession, cik):
-        return {"company_name": f"Co {accession}", "period": "20260519", "items": []}
+        # Mirrors extract_filing_header, which always includes a filed_at key.
+        return {"company_name": f"Co {accession}", "period": "20260519", "filed_at": "20260519120000", "items": []}
 
     worker = BackfillWorker(db, metadata_fetcher=meta_fetcher)
     n = worker.backfill_metadata_batch(limit=10)
@@ -83,7 +84,7 @@ def test_metadata_backfill_error_is_isolated(db):
     def meta_fetcher(accession, cik):
         if accession == "bad-meta":
             raise RuntimeError("404")
-        return {"company_name": "Good"}
+        return {"company_name": "Good", "filed_at": "20260519120000"}
 
     worker = BackfillWorker(db, metadata_fetcher=meta_fetcher)
     n = worker.backfill_metadata_batch(limit=10)

@@ -41,7 +41,7 @@ def test_missing_filing_metadata_and_update(db):
     )
     missing = db.exhibits_missing_filing_metadata(limit=10)
     assert len(missing) == 1
-    db.update_filing_metadata(missing[0]["id"], {"company_name": "X"})
+    db.update_filing_metadata(missing[0]["id"], {"company_name": "X", "filed_at": "20260519120000"})
     assert db.exhibits_missing_filing_metadata(limit=10) == []
 
 
@@ -156,3 +156,21 @@ def test_empty_filing_metadata_persists_not_null(db):
     rows = db.recent_ex10()
     assert rows[0]["filing_metadata"] == "{}"
     assert db.exhibits_missing_filing_metadata(limit=10) == []
+
+
+def test_missing_filing_metadata_includes_legacy_rows_without_filed_at(db):
+    # Legacy row: filing_metadata parsed before filed_at existed (no such key).
+    db.save_ex10_exhibit(
+        {"accession": "legacy", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "l.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="x", filing_metadata={"company_name": "Old Co"},
+    )
+    # Current row: already carries filed_at.
+    db.save_ex10_exhibit(
+        {"accession": "current", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "c.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="x", filing_metadata={"company_name": "New Co", "filed_at": "20260526113637"},
+    )
+    accs = {m["accession"] for m in db.exhibits_missing_filing_metadata(limit=10)}
+    assert "legacy" in accs       # re-fetched to add filed_at
+    assert "current" not in accs  # already has filed_at -> skipped

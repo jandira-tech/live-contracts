@@ -81,6 +81,9 @@ a:hover { text-decoration: underline; text-decoration-color: var(--accent); text
   display: inline-flex; align-items: center; gap: 0.6rem; color: var(--text);
 }
 .sl-wordmark:hover { text-decoration: none; }
+/* Glowing live square in the wordmark (reuses the hero pulse-square keyframes). */
+.sl-wordmark .pulse { width: 7px; height: 7px; background: var(--accent); position: relative; flex: 0 0 auto; }
+.sl-wordmark .pulse::after { content: ''; position: absolute; inset: -3px; background: var(--accent); opacity: 0.35; animation: pulse-square 2s ease-out infinite; }
 .sl-wordmark .dot { color: var(--text-secondary); }
 .sl-wordmark .tag {
   font-size: 0.56rem; letter-spacing: 0.14em; color: var(--text-secondary);

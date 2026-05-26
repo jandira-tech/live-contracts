@@ -291,6 +291,8 @@ class Database:
             rows = conn.execute(
                 """SELECT id, accession, cik, filename FROM ex10_exhibits
                    WHERE filing_metadata IS NULL
+                      OR (filing_metadata <> '{}'
+                          AND filing_metadata NOT LIKE '%"filed_at"%')
                    ORDER BY found_at DESC, id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
