@@ -315,3 +315,18 @@ def test_form_facets_counts(db):
     )
     facets = dict((f["form_type"], f["count"]) for f in db.form_facets())
     assert facets == {"8-K": 2, "10-Q": 1}
+
+
+def test_finalized_unmirrored_selects_only_complete_rows(tmp_path):
+    from sec_listener.db import Database
+    d = Database(str(tmp_path / "f.db")); d.init()
+    d.save_ex10_exhibit({"accession":"a","cik":"1","form_type":"8-K","doc_type":"EX-10.1",
+                         "filename":"a.htm","description":"","sequence":"1","url":"u"},
+                        markdown="body", filing_metadata={"filed_at":"20260501120000"})
+    d.update_image_urls(d.recent_ex10()[0]["id"], [])         # images resolved -> finalized
+    d.save_ex10_exhibit({"accession":"b","cik":"1","form_type":"8-K","doc_type":"EX-10.1",
+                         "filename":"b.htm","description":"","sequence":"1","url":"u"}, markdown=None)
+    fin = d.finalized_unmirrored(limit=10)
+    assert [r["accession"] for r in fin] == ["a"]
+    d.mark_mirrored([r["id"] for r in fin])
+    assert d.finalized_unmirrored(limit=10) == []
