@@ -610,6 +610,7 @@ git commit -m "test(d1): cleanExcerpt unit tests + ex10Since recency window"
 
 `frontend/test/ingest.test.ts`:
 ```ts
+import { env } from 'cloudflare:test';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { seed, testDb } from './seed';   // seed() also applies migrations
 import { POST } from '../src/pages/api/ingest';
@@ -623,7 +624,9 @@ function ctx(body: unknown, key?: string) {
   if (key) headers['X-API-Key'] = key;
   return {
     request: new Request('https://x/api/ingest', { method: 'POST', headers, body: JSON.stringify(body) }),
-    locals: { runtime: { env: { SEC_API_KEY: 'secret' } } },
+    // Spread the real cloudflare:test env so env.DB (the D1 binding) is present —
+    // the route does drizzle(env.DB); SEC_API_KEY is overlaid for the auth check.
+    locals: { runtime: { env: { ...env, SEC_API_KEY: 'secret' } } },
   } as any;
 }
 const ROW = {
