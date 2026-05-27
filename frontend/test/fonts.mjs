@@ -30,8 +30,9 @@ function assert(cond, msg) {
 }
 
 // No JetBrains Mono anywhere — neither the Google request nor the --font-mono stack.
-assert(!/JetBrains\+?Mono/i.test(base), 'Base.astro does not request JetBrains Mono');
-assert(!/JetBrains Mono/i.test(css), 'global.css --font-mono drops JetBrains Mono');
+// Match any separator between the words ('+', space, '%20', etc.), not just '+'.
+assert(!/JetBrains.{0,3}Mono/i.test(base), 'Base.astro does not request JetBrains Mono');
+assert(!/JetBrains.{0,3}Mono/i.test(css), 'global.css --font-mono drops JetBrains Mono');
 
 // Exactly one Google Fonts stylesheet link (no double import).
 const sheetLinks = (base.match(/fonts\.googleapis\.com\/css2/g) || []).length;
