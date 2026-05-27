@@ -127,6 +127,17 @@ a:hover { text-decoration: underline; text-decoration-color: var(--accent); text
 .sl-hero p.lede { font-size: 1rem; line-height: 1.6; color: var(--text-secondary); max-width: 620px; margin: 0; }
 .sl-hero hr.divider { height: var(--rule-yellow-h); width: var(--rule-yellow-w); background: var(--accent); border: 0; margin: 2.25rem 0 0; }
 
+/* Export-to-Cicero pill — structural yellow fill, mono label, sharp corners. */
+.sl-export { margin: 1.1rem 0 0; }
+.sl-cicero-pill {
+  display: inline-flex; align-items: center; gap: 0.45rem;
+  font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase;
+  background: var(--accent); color: var(--text);
+  padding: 0.5rem 0.9rem; border: 1px solid var(--accent); border-radius: var(--radius);
+  transition: background var(--t-fast);
+}
+.sl-cicero-pill:hover { text-decoration: none; background: transparent; }
+
 .filing-details { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; margin-bottom: 1.1rem; }
 .filing-details h2 { margin: 0 0 0.6rem; font-size: 0.72rem; color: var(--text); font-family: var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; }
 .filing-details dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; margin: 0; font-size: 0.88rem; }

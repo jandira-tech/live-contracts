@@ -18,6 +18,13 @@ if (error || !detail) {
 const html = detail.markdown ? marked.parse(detail.markdown) : '';
 const title = detail.description?.trim() || `${detail.doc_type} — ${detail.filename}`;
 const images = detail.image_urls ?? [];
+
+// One-click hand-off to Cicero: pass just the exhibit id. Cicero reads the
+// markdown from the shared sec-ex10 D1 (same Cloudflare account, bound into its
+// Worker) and deserializes it into a new document. Only when markdown exists.
+const ciceroUrl = detail.markdown
+  ? `https://cicero.im/editor?importEx10=${detail.id}`
+  : null;
 const f = detail.filing ?? {};
 const hasFiling = Boolean(f.company_name || f.period || f.file_number || (f.items?.length));
 
@@ -38,6 +45,11 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-re
       <a href={detail.filing_url} rel="noopener" target="_blank">View original filing on SEC EDGAR →</a>
       &nbsp;·&nbsp; seen {formatNY(detail.found_at)}
     </p>
+    {ciceroUrl && (
+      <p class="sl-export">
+        <a class="sl-cicero-pill" href={ciceroUrl} target="_blank" rel="noopener">Export to Cicero →</a>
+      </p>
+    )}
     <hr class="divider" />
   </header>
 
