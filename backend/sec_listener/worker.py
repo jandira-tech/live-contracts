@@ -198,22 +198,22 @@ class BackfillWorker:
         logger.info("Backfill worker stopped")
 
 
-async def _hf_sync_loop(db: Database, *, token: str, repo: str, interval: float):
-    """Periodically mirror ex10_exhibits to the HF dataset (parallel SQL sink).
+async def _d1_push_loop(db: Database, *, url: str, key: str, interval: float):
+    """Periodically push *finalized* SQLite rows to D1 via the ingest route.
 
-    SQLite stays authoritative; failures here never disturb the listener/backfill.
+    SQLite stays the working buffer; D1 is authoritative. Failures here never
+    disturb the listener/backfill — rows stay unmirrored and retry next cycle.
     """
-    from .hf_sync import sync_exhibits
+    from .d1_sync import push_finalized
 
-    logger.info("HF dataset sync enabled -> %s (every %.0fs)", repo, interval)
+    logger.info("D1 push enabled -> %s (every %.0fs)", url, interval)
     while True:
         try:
-            n = await asyncio.to_thread(sync_exhibits, db, repo, token=token)
+            n = await asyncio.to_thread(push_finalized, db, url, key)
             if n:
-                logger.info("HF sync: snapshotted %d exhibits to %s", n, repo)
-        except Exception as exc:  # noqa: BLE001 - the mirror must never crash the worker
-            logger.warning("HF dataset sync failed: %s", exc)
-        # CancelledError (BaseException) propagates out to end the task — idiomatic.
+                logger.info("D1 push: sent %d finalized exhibits", n)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("D1 push loop error: %s", exc)
         await asyncio.sleep(interval)
 
 
@@ -228,20 +228,13 @@ async def _run_all(config: Config):
         asyncio.create_task(worker.run(rps=config.requests_per_second), name="backfill"),
     ]
 
-    # Parallel HF dataset sink — opt-in via HF_TOKEN. Without it, SQLite is the
-    # sole (plan-B) store and nothing here runs.
-    hf_token = os.environ.get("HF_TOKEN")
-    if hf_token:
-        from .hf_sync import DATASET_REPO
-
+    # Push finalized rows to D1 (authoritative store) via the ingest route —
+    # gated on the shared SEC_API_KEY. Without it, SQLite is the sole store.
+    if config.api_key:
         tasks.append(asyncio.create_task(
-            _hf_sync_loop(
-                db,
-                token=hf_token,
-                repo=os.environ.get("HF_DATASET_REPO", DATASET_REPO),
-                interval=float(os.environ.get("SEC_HF_SYNC_INTERVAL", "900")),
-            ),
-            name="hf-sync",
+            _d1_push_loop(db, url=config.d1_ingest_url, key=config.api_key,
+                          interval=float(os.environ.get("SEC_D1_PUSH_INTERVAL", "60"))),
+            name="d1-push",
         ))
 
     # Optionally serve the internal API in-process, so one supervised process
