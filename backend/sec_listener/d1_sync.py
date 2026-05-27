@@ -26,9 +26,9 @@ def _http_poster(url: str, rows: list[dict[str, Any]], *, key: str) -> list[str]
     return resp.json().get("accepted", [])
 
 
-def push_finalized(db, url: str, key: str, *, batch: int = 100,
-                   poster: Callable[[str, list[dict]], list[str]] | None = None) -> int:
-    rows = db.finalized_unmirrored(limit=batch)
+def push_finalized(db, url: str, key: str, *, batch: int = 100, require_images: bool = True,
+                   poster: Callable[[str, list[dict]], list[int]] | None = None) -> int:
+    rows = db.finalized_unmirrored(limit=batch, require_images=require_images)
     if not rows:
         return 0
     records = [to_ingest_record(r) for r in rows]
@@ -38,6 +38,8 @@ def push_finalized(db, url: str, key: str, *, batch: int = 100,
     except Exception as exc:  # noqa: BLE001
         logger.warning("D1 push failed: %s", exc)
         return 0
-    pushed = [r["id"] for r in rows if r["accession"] in accepted]
+    # Match by unique id — accession is NOT unique, so matching on it could mark
+    # a sibling (same accession, different doc_type/filename) that wasn't pushed.
+    pushed = [r["id"] for r in rows if r["id"] in accepted]
     db.mark_mirrored(pushed)
     return len(pushed)

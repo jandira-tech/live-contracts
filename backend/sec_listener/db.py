@@ -253,10 +253,14 @@ class Database:
             conn.commit()
         return inserted
 
-    def finalized_unmirrored(self, limit: int = 100) -> list[dict[str, Any]]:
+    def finalized_unmirrored(self, limit: int = 100, *, require_images: bool = True) -> list[dict[str, Any]]:
+        # When image capture is disabled (no HF_TOKEN) image_urls stays NULL, so
+        # require_images=False lets rows finalize on markdown + metadata alone.
+        # The clause is a fixed internal literal (not user input) — no injection.
+        image_clause = "AND image_urls IS NOT NULL" if require_images else ""
         with self.connect() as conn:
             rows = conn.execute(
-                """SELECT id, accession, cik, form_type, doc_type, filename, description,
+                f"""SELECT id, accession, cik, form_type, doc_type, filename, description,
                           sequence, filing_url, found_at,
                           json_extract(filing_metadata, '$.filed_at') AS filed_at,
                           markdown_status, filing_metadata, image_urls, markdown
@@ -264,7 +268,7 @@ class Database:
                    WHERE COALESCE(mirrored, 0) = 0
                      AND markdown_status IN ('done', 'empty', 'error')
                      AND filing_metadata IS NOT NULL
-                     AND image_urls IS NOT NULL
+                     {image_clause}
                    ORDER BY id ASC LIMIT ?""",
                 (limit,),
             ).fetchall()

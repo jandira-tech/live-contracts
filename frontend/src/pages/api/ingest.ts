@@ -35,7 +35,10 @@ const j = (o: unknown, status: number) =>
 
 export async function POST(context: APIContext): Promise<Response> {
   const e = env as unknown as Env;
-  if (e.SEC_API_KEY && context.request.headers.get('X-API-Key') !== e.SEC_API_KEY) {
+  // Fail closed: a missing key is a misconfiguration, not an open door.
+  const key = e.SEC_API_KEY;
+  if (!key) return j({ error: 'server misconfigured: SEC_API_KEY unset' }, 500);
+  if (context.request.headers.get('X-API-Key') !== key) {
     return j({ error: 'invalid or missing API key' }, 401);
   }
   let body: { rows?: InRow[] };
@@ -46,13 +49,20 @@ export async function POST(context: APIContext): Promise<Response> {
   if (rows.length > 200) return j({ error: 'max 200 rows per batch' }, 400);
 
   const db = drizzle(e.DB, { schema });
-  // D1 caps bound parameters at 100 per query; 15 cols * 6 rows = 90 binds.
-  const accepted: string[] = [];
+  // D1 caps bound parameters at 100/query → ≤6 rows/insert (15 cols * 6 = 90).
+  // Run the chunks in one atomic db.batch (fewer round-trips, no partial write).
+  // Return the unique ids accepted (NOT accessions — accession isn't unique, so
+  // the writer must mark mirrored by id to avoid dropping same-accession rows).
+  const accepted: number[] = [];
+  const stmts = [];
   for (let i = 0; i < rows.length; i += 6) {
     const chunk = rows.slice(i, i + 6);
-    await db.insert(exhibits).values(chunk.map(toInsert))
-      .onConflictDoUpdate({ target: [exhibits.accession, exhibits.docType, exhibits.filename], set: CONFLICT_SET });
-    for (const r of chunk) accepted.push(r.accession);
+    stmts.push(
+      db.insert(exhibits).values(chunk.map(toInsert))
+        .onConflictDoUpdate({ target: [exhibits.accession, exhibits.docType, exhibits.filename], set: CONFLICT_SET }),
+    );
+    for (const r of chunk) accepted.push(r.id);
   }
+  await db.batch(stmts as unknown as Parameters<typeof db.batch>[0]);
   return j({ accepted }, 200);
 }

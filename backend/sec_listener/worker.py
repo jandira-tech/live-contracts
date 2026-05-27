@@ -198,23 +198,29 @@ class BackfillWorker:
         logger.info("Backfill worker stopped")
 
 
-async def _d1_push_loop(db: Database, *, url: str, key: str, interval: float):
+async def _d1_push_loop(db: Database, *, url: str, key: str, interval: float,
+                        require_images: bool = True, batch: int = 100):
     """Periodically push *finalized* SQLite rows to D1 via the ingest route.
 
     SQLite stays the working buffer; D1 is authoritative. Failures here never
     disturb the listener/backfill — rows stay unmirrored and retry next cycle.
+    When image capture is off (no HF_TOKEN) rows finalize without image_urls.
     """
     from .d1_sync import push_finalized
 
     logger.info("D1 push enabled -> %s (every %.0fs)", url, interval)
     while True:
+        delay = interval
         try:
-            n = await asyncio.to_thread(push_finalized, db, url, key)
+            n = await asyncio.to_thread(push_finalized, db, url, key,
+                                        batch=batch, require_images=require_images)
             if n:
                 logger.info("D1 push: sent %d finalized exhibits", n)
+            if n >= batch:
+                delay = 1.0  # full batch -> backlog likely; drain quickly, don't idle
         except Exception as exc:  # noqa: BLE001
             logger.warning("D1 push loop error: %s", exc)
-        await asyncio.sleep(interval)
+        await asyncio.sleep(delay)
 
 
 async def _run_all(config: Config):
@@ -233,7 +239,8 @@ async def _run_all(config: Config):
     if config.api_key:
         tasks.append(asyncio.create_task(
             _d1_push_loop(db, url=config.d1_ingest_url, key=config.api_key,
-                          interval=float(os.environ.get("SEC_D1_PUSH_INTERVAL", "60"))),
+                          interval=float(os.environ.get("SEC_D1_PUSH_INTERVAL", "60")),
+                          require_images=bool(os.environ.get("HF_TOKEN"))),
             name="d1-push",
         ))
 
