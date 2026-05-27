@@ -33,6 +33,25 @@ HF Space.
   → `arthrod/sec-ex10-exhibits`, preserving the public/streamable dataset. This *replaces* the old
   SQLite→parquet mirror as a downstream artifact, not an operational dependency.
 
+### Stack decisions (validated against emdash-cms)
+
+Reviewed `emdash-cms/emdash` (an Astro-on-Cloudflare CMS) `packages/core/src/db` + `packages/cloudflare/src/db/d1.ts`:
+
+- **Binding access:** `import { env } from "cloudflare:workers"` gives the D1 binding at *module scope*
+  anywhere in the Worker (pages, `lib/`, **and live loaders**). This is how emdash's D1 adapter reads
+  its binding. So the binding is *not* request-scoped-only — we use a module-level singleton `getDb()`
+  and do **not** thread `Astro.locals.runtime.env.DB` through functions. The earlier worry ("live
+  loaders can't see the binding") is moot; **the live-collection loaders stay**, calling `getDb()`.
+- **Query layer: Drizzle ORM** (`drizzle-orm/d1`) with a TS schema and `drizzle-kit`-generated
+  migrations applied via `wrangler d1 migrations apply`. Type-safe, composable, and portable (D1 ↔
+  Turso/libSQL ↔ Postgres) if we ever move stores.
+- **No D1 Sessions API / request-scoped middleware.** emdash uses `createRequestScopedDb` + bookmark
+  cookies only for read-replica read-your-writes. Our writes come from a *separate origin* (HF worker)
+  and reads are CDN-cached, so a singleton handle (`session: disabled`) suffices. Sessions remain a
+  future perf/consistency lever, not needed now.
+- **Testability:** data functions take an optional `db: DB = getDb()`; tests pass a Drizzle instance
+  built over `cloudflare:test`'s `env.DB`, production calls use the singleton.
+
 ## Target architecture
 
 ```
