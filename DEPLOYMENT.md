@@ -1,64 +1,74 @@
 # Deployment
 
-Two halves: the **internal backend** (runs on your host, never public) and the
-**Cloudflare Worker frontend** (public edge, serves prerendered pages + live SSR).
+Two halves: the **backend ingestion worker** (listener + backfill, running on a Hugging Face
+Docker Space) and the **Cloudflare Worker frontend** (the only public surface, live SSR at the
+edge). **Cloudflare D1** is the durable, authoritative store; the frontend reads it directly via
+the `DB` binding, and the backend pushes *finalized* rows to it through `POST /api/ingest`.
 
 ```
-SEC EDGAR ──> [worker: listener + backfill] ──> SQLite (ex10_listener.db)
-                                                     │
-                                          [FastAPI internal API]  (127.0.0.1:8799, key-gated)
-                                                     │  Cloudflare Tunnel (private)
-                                                     ▼
-                              [Astro frontend on Cloudflare Workers]  ──CDN/SWR──> users
+SEC EDGAR ──> [HF Space worker: listener + markdown/metadata/image backfill] ──> working SQLite
+                                            │  finalized rows → POST /api/ingest (X-API-Key)
+                                            ▼
+                        [Astro Worker] ──UPSERT──▶ Cloudflare D1 (authoritative)
+                                            ▲  reads via Drizzle binding
+                        live-contracts.arthur.law ◀── CDN/SWR
 ```
 
-## 1. Backend (host, private)
+## A. Backend — Hugging Face Space (production)
+
+The Space bundle lives in `deploy/hf-space/` (Docker, port 7860). One process runs the
+listener + backfill, pushing finalized rows to D1. See [deploy/hf-space/README.md](./deploy/hf-space/README.md).
+
+Space secrets:
+
+| Secret | Purpose |
+|--------|---------|
+| `SEC_API_KEY` | sent as `X-API-Key` to the Worker's `/api/ingest` (same value as the Worker's `SEC_API_KEY` secret) |
+| `HF_TOKEN` | enables scanned-exhibit image capture → HF + the phase-2 dataset export |
+
+D1 is durable, so there is **no boot-restore** — the Space's SQLite is just a working buffer; on
+restart it reseeds from `seed.db` and re-pushes (idempotent UPSERT). Set `D1_INGEST_URL` (defaults
+to `https://live-contracts.arthur.law/api/ingest`).
+
+## B. Backend — self-hosted (alternative)
 
 ```bash
 uv pip install -e .
-# Worker = continuous listener + markdown backfill (supervised by watchdog.sh via cron)
+# Worker = continuous listener + backfill (supervise via cron/watchdog)
 SEC_RUN_HOURS=0 python -m sec_listener.worker
 # Internal API (bind localhost; set a strong key)
 SEC_API_KEY="$(openssl rand -hex 24)" SEC_API_HOST=127.0.0.1 SEC_API_PORT=8799 \
   python -m sec_listener.api
 ```
 
-The API binds `127.0.0.1` and requires `X-API-Key`. **Do not** expose the port.
-
-## 2. Private link: Cloudflare Tunnel
-
-Expose the API to *only* your Worker (no public port):
+The API binds `127.0.0.1` and requires `X-API-Key`. **Do not** expose the port directly —
+front it with a **Cloudflare Tunnel** locked behind **Cloudflare Access** so only the Worker
+can reach it:
 
 ```bash
 cloudflared tunnel create sec-api
 cloudflared tunnel route dns sec-api sec-api.internal.<your-domain>
-# config.yml:  ingress: [{ hostname: sec-api.internal.<your-domain>, service: http://127.0.0.1:8799 }, { service: http_status:404 }]
+# config.yml: ingress: [{ hostname: sec-api.internal.<your-domain>, service: http://127.0.0.1:8799 }, { service: http_status:404 }]
 cloudflared tunnel run sec-api
 ```
 
-Lock the tunnel hostname behind **Cloudflare Access** (service token) so only the
-Worker can reach it.
-
-## 3. Frontend (Cloudflare Workers)
+## C. Frontend (Cloudflare Workers)
 
 ```bash
 cd frontend
-bun install && bun run build        # astro build
-wrangler kv namespace create SESSION # once; put id in wrangler.jsonc
+bun install && bun run build         # astro build (only /404 is static; everything else is SSR)
 wrangler secret put SEC_API_KEY      # the key the API expects
-# set SEC_API_URL in wrangler.jsonc -> https://sec-api.internal.<your-domain>
+# set SEC_API_URL in wrangler.jsonc -> the HF Space URL (or the tunnel hostname)
 wrangler deploy
 ```
 
-Live deployment: **https://sec-ex10-frontend.cicero-im.workers.dev**
+Live deployment: **https://live-contracts.arthur.law**
 
-- Prerendered (archive/detail/search) work from the build snapshot regardless of
-  the API. The live homepage feed needs the tunnel + `SEC_API_KEY` set; until then
-  it degrades gracefully ("temporarily unavailable").
-- Re-run `bun run build && wrangler deploy` to refresh the prerendered snapshot
-  (e.g. via cron) so the static archive stays current.
+Every page is **live SSR** — fetched from the API at request time and cached at the edge.
+There is no prerendered snapshot to refresh: content updates need **no rebuild or redeploy**;
+deploy only for code changes. If the API is unreachable the pages degrade gracefully.
 
 ## Caching
 
-The API sets `Cache-Control: ... stale-while-revalidate`; Cloudflare's CDN serves
-cached responses instantly and revalidates in the background.
+The API sets `Cache-Control: ... stale-while-revalidate`; Cloudflare's CDN serves cached
+responses instantly and revalidates in the background.

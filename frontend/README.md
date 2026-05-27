@@ -1,31 +1,40 @@
-# SEC EX-10 Live — Frontend (Astro 6, fully live SSR)
+# Live Contracts — Frontend (Astro 6, fully live SSR)
 
-Astro 6 app on **Cloudflare Workers**. Every page is **live SSR** — fetched from
-the backend API at request time, cached at the edge (CDN + stale-while-revalidate).
-**No rebuilds or redeploys** are needed when content changes; deploy only for code.
+Astro 6 app on **Cloudflare Workers**, served at **[live-contracts.arthur.law](https://live-contracts.arthur.law)**.
+Every page is **live SSR** — querying **Cloudflare D1** (Drizzle over the `DB` binding) at request
+time, cached at the edge (CDN + stale-while-revalidate). **No rebuilds or redeploys** are needed
+when content changes; deploy only for code.
 
 ## Architecture
 
 ```
-HF Space (FastAPI: listener + backfill + API, key-gated)
-        ▲  request-time fetch (SEC_API_URL + SEC_API_KEY)
+Cloudflare D1 (authoritative, written by the backend via /api/ingest)
+        ▲  Drizzle query via the `DB` binding (getDb(), cloudflare:workers env)
 Cloudflare Worker (Astro SSR)  ──CDN / stale-while-revalidate──▶ users
 ```
 
+Data access lives in `src/lib/api.ts` (Drizzle queries) + `src/db/` (schema + `getDb()` singleton).
+The live loaders in `src/loaders/` call those functions, which default to `getDb()`.
+
 - **Homepage** (`/`) — Live Content Collection: agreements in the last 60s, 60s auto-refresh.
-- **Archive** (`/agreements/[page]`) — live SSR, paginated.
-- **Detail** (`/agreement/[id]`) — live SSR via `getLiveEntry`; markdown → HTML.
-- **Search** (`/search?q=`) — live full-text search against `/api/search` (replaced Pagefind).
-- **Stats strip** — live `/api/stats`.
+- **Browse** (`/agreements/[page]`) — paginated, with a faceted sidebar (filing type, filer/CIK
+  filters, newest/oldest sort). Ordering is by actual **filing time**.
+- **Detail** (`/agreement/[id]`) — markdown → HTML; captured exhibit images; **Export to Cicero** pill.
+- **Search** (`/search?q=`) — full-text search (LIKE over description + markdown).
+- **Ingest** — `POST /api/ingest` (key-gated): the backend UPSERTs finalized rows into D1.
 
-## Config (`astro:env`, server)
+## Design system
 
-| Var | Meaning |
+Light editorial-technical theme (tokens in `src/styles/global.css`). Two font families only:
+**Manrope** (body, Google Fonts) and self-hosted **Departure Mono** (mono, `public/fonts/`). The
+structural yellow accent is never used as text color. `bun run test:fonts` guards the font wiring.
+
+## Config
+
+| Binding / Var | Meaning |
 |-----|---------|
-| `SEC_API_URL` | Backend base URL (the HF Space). Set in `wrangler.jsonc`. |
-| `SEC_API_KEY` | API key (`X-API-Key`). Set as a Worker secret: `wrangler secret put SEC_API_KEY`. |
-
-Local dev: put both in `.env`.
+| `DB` (D1) | The `sec-ex10` D1 database, bound in `wrangler.jsonc`. Read via `getDb()`. |
+| `SEC_API_KEY` | Secret gating `POST /api/ingest`. `wrangler secret put SEC_API_KEY` (same value the backend sends). |
 
 ## Develop / deploy
 
@@ -33,8 +42,9 @@ Local dev: put both in `.env`.
 bun install
 bun run dev              # http://localhost:4321
 bun run build            # fast — only /404 is static; everything else is SSR
+bun run test:fonts       # font-loading guard (no server needed)
 bun run test:smoke       # BASE=<url> node test/smoke.mjs
 wrangler deploy          # deploy code changes (content needs no redeploy)
 ```
 
-Live: **https://sec-ex10-frontend.cicero-im.workers.dev**
+Live: **https://live-contracts.arthur.law**
