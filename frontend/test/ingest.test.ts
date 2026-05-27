@@ -27,7 +27,7 @@ it('400 on malformed body', async () => { expect((await POST(ctx({ nope: 1 }, 's
 it('upserts and is idempotent', async () => {
   const r1 = await POST(ctx({ rows: [ROW] }, 'secret'));
   expect(r1.status).toBe(200);
-  expect(await r1.json()).toMatchObject({ accepted: ['acc-5'] });
+  expect(await r1.json()).toMatchObject({ accepted: [5] }); // unique ids, not accessions
   await POST(ctx({ rows: [{ ...ROW, markdown: 'updated' }] }, 'secret'));
   const db = testDb();
   const row = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0];
