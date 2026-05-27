@@ -9,7 +9,9 @@
     "preview": "astro preview",
     "check": "astro check",
     "sync": "astro sync",
-    "test:smoke": "node test/smoke.mjs"
+    "test:smoke": "node test/smoke.mjs",
+    "test:unit": "vitest run",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.5.4",
