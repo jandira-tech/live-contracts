@@ -12,6 +12,10 @@ export function testDb(): DrizzleD1Database<typeof schema> {
 }
 
 export async function seed() {
+  // Storage isolation is per test *file*, not per test, so the table survives
+  // across this file's beforeEach hooks. Drop it first to re-apply migrations
+  // and re-insert fixtures from a clean slate on every test.
+  await (env as any).DB.exec('DROP TABLE IF EXISTS exhibits');
   for (const key of Object.keys(migrations).sort()) {
     for (const stmt of migrations[key].split('--> statement-breakpoint')) {
       const s = stmt.trim();
