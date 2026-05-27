@@ -76,8 +76,9 @@ SEC ──> [HF Space Python worker]            (ingestion only — datamule/mar
    - `filed_at` stored as an explicit column (extracted from `filing_metadata.filed_at` at ingest)
      so it can be indexed without relying on a generated-column + `json_extract` (verify D1 support;
      explicit column is the safe path).
-   - Indexes: `filed_at DESC`, `form_type`, `cik`. Unique key on `(accession, filename)` so ingest
-     is idempotent.
+   - Indexes: `filed_at DESC`, `form_type`, `cik`. Unique key on `(accession, doc_type, filename)`
+     — matching the source SQLite `ex10_exhibits` constraint exactly — so ingest is idempotent and
+     distinct exhibits aren't coalesced.
    - Search: SQLite **FTS5** virtual table over `description`+`markdown` if D1 supports it (verify in
      PR2); otherwise `LIKE` fallback (current behavior).
 
