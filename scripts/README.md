@@ -5,28 +5,31 @@ Operational scripts run from a **trusted host** (GitHub Action / cron) — never
 ## `export_d1_to_hf.py` — D1 → HF parquet public export (phase 2)
 
 Exports the full D1 `exhibits` table to `data/exhibits.parquet` in the public HF dataset
-`arthrod/sec-ex10-exhibits`. Reads D1 via the Cloudflare D1 HTTP API in id-keyset pages
-(`WHERE id > ? ORDER BY id LIMIT 1000`), writes a parquet file, and uploads it with `huggingface_hub`.
+`arthrod/sec-ex10-exhibits`. Reads D1 through **`wrangler d1 execute --remote --json`** in
+id-keyset pages (`WHERE id > ? ORDER BY id LIMIT 100`), writes a parquet file, and uploads it
+with `huggingface_hub`.
 
-Run:
+Run from the repo root (needs `frontend/wrangler.jsonc`; run `cd frontend && bun install` once):
 
 ```bash
-uv run scripts/export_d1_to_hf.py
+HF_TOKEN=... uv run scripts/export_d1_to_hf.py
 ```
 
-(PEP-723 inline metadata declares deps: `httpx`, `pyarrow`, `huggingface_hub`.)
+(PEP-723 inline metadata declares deps: `pyarrow`, `huggingface_hub`.)
 
-### Environment variables
+### Credentials
+
+Because it shells out to `wrangler`, a **manual / local run needs no Cloudflare API token** —
+it uses your existing `wrangler login`.
 
 | Var | Purpose |
 | --- | --- |
-| `CF_ACCOUNT_ID` | Cloudflare account ID. |
-| `CF_D1_DATABASE_ID` | D1 database ID — `dfb55595-bebe-4d5f-80e6-658538ad3da8`. |
-| `CF_API_TOKEN` | Cloudflare API token scoped **`D1:Read`** only. |
 | `HF_TOKEN` | Hugging Face token with write access to `arthrod/sec-ex10-exhibits`. |
 
-### Security note
+For an **unattended GitHub Action / cron** there's no interactive login, so wrangler reads
+`CLOUDFLARE_API_TOKEN` from the env — mint that one in the Cloudflare dashboard scoped **`D1:Read`**
+(wrangler cannot create tokens). That is the only place a Cloudflare token is needed; the public
+Worker never holds one.
 
-This script is the **only** place a Cloudflare API token is used, and that token is
-**read-only** (`D1:Read`). It must be run only from a trusted host (GitHub Action / cron),
-**never** from the public Worker. The public Worker never holds a Cloudflare API token.
+> This is a *mirror refresh* — running it when the HF parquet already matches D1 just re-uploads
+> identical content. It earns its keep once D1 has grown past the mirror.
