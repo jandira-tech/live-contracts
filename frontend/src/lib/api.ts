@@ -1,12 +1,14 @@
 /**
- * Typed client for the internal SEC EX-10 API.
- *
- * The API is private (localhost / Cloudflare Tunnel). The Worker holds the key.
- * Every call is defensive: a network error or non-200 yields an empty result
- * instead of throwing, so neither the build (prerender) nor a live request
- * ever hard-fails because the origin blipped.
+ * Typed data layer for the SEC EX-10 collection, backed by Cloudflare D1
+ * (Drizzle ORM over the `DB` binding). Each function takes an optional `db`
+ * as its LAST argument, defaulting to the request-time singleton from
+ * `getDb()` — so the live loaders/pages call them unchanged, while tests
+ * inject a seeded test database.
  */
-import { SEC_API_URL, SEC_API_KEY } from 'astro:env/server';
+import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
+import { exhibits } from '../db/schema';
+import { getDb, type DB } from '../db/client';
+import { rowToSummary, parseFiling, parseImageUrls } from './summary';
 
 export interface FilingHeader {
   company_name?: string;
@@ -56,27 +58,6 @@ export interface PageResult {
   total_pages: number;
 }
 
-function headers(): Record<string, string> {
-  const h: Record<string, string> = { Accept: 'application/json' };
-  if (SEC_API_KEY) h['X-API-Key'] = SEC_API_KEY;
-  return h;
-}
-
-async function getJson<T>(path: string, fallback: T): Promise<T> {
-  try {
-    // Bounded timeout so a slow/cold backend can't hang the Worker request;
-    // we degrade to the fallback and let the next request (or refresh) retry.
-    const res = await fetch(`${SEC_API_URL}${path}`, {
-      headers: headers(),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return fallback;
-    return (await res.json()) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 export interface BrowseFilters {
   form?: string;
   cik?: string;
@@ -84,30 +65,7 @@ export interface BrowseFilters {
   sort?: 'newest' | 'oldest';
 }
 
-export function listEx10(page = 1, pageSize = 20, filters: BrowseFilters = {}): Promise<PageResult> {
-  const qs = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
-  if (filters.form) qs.set('form', filters.form);
-  if (filters.cik) qs.set('cik', filters.cik);
-  if (filters.filer) qs.set('filer', filters.filer);
-  if (filters.sort === 'oldest') qs.set('sort', 'oldest');
-  return getJson<PageResult>(`/api/ex10?${qs}`, {
-    items: [], total: 0, page, page_size: pageSize, total_pages: 0,
-  });
-}
-
 export interface FormFacet { form_type: string; count: number; }
-
-export function ex10Facets(): Promise<{ forms: FormFacet[] }> {
-  return getJson<{ forms: FormFacet[] }>(`/api/facets`, { forms: [] });
-}
-
-export async function ex10Since(seconds = 60): Promise<{ window_seconds: number; count: number; items: Ex10Summary[] }> {
-  return getJson(`/api/ex10/since?seconds=${seconds}`, { window_seconds: seconds, count: 0, items: [] });
-}
-
-export async function ex10Detail(id: number | string): Promise<Ex10Detail | null> {
-  return getJson<Ex10Detail | null>(`/api/ex10/${id}`, null);
-}
 
 export interface Stats {
   total: number;
@@ -122,38 +80,77 @@ export interface SearchResult extends PageResult {
   query: string;
 }
 
-export function ex10Search(query: string, page = 1, pageSize = 20): Promise<SearchResult> {
-  const q = encodeURIComponent(query);
-  return getJson<SearchResult>(`/api/search?q=${q}&page=${page}&page_size=${pageSize}`, {
-    query,
-    items: [],
-    total: 0,
-    page,
-    page_size: pageSize,
-    total_pages: 0,
-  });
+// substr keeps list payloads light (markdown bodies avg ~67KB).
+const summaryCols = {
+  id: exhibits.id, accession: exhibits.accession, cik: exhibits.cik,
+  formType: exhibits.formType, docType: exhibits.docType, filename: exhibits.filename,
+  description: exhibits.description, sequence: exhibits.sequence, filingUrl: exhibits.filingUrl,
+  foundAt: exhibits.foundAt, filedAt: exhibits.filedAt, markdownStatus: exhibits.markdownStatus,
+  filingMetadata: exhibits.filingMetadata, imageUrls: exhibits.imageUrls,
+  markdown: sql<string>`substr(${exhibits.markdown}, 1, 2000)`,
+};
+// NULLS LAST emulation (D1's default null ordering is not guaranteed).
+const nullsLast = sql`(${exhibits.filedAt} IS NULL OR ${exhibits.filedAt} = '') ASC`;
+const orderNewest = [nullsLast, desc(exhibits.filedAt), desc(exhibits.foundAt), desc(exhibits.id)];
+const orderOldest = [nullsLast, asc(exhibits.filedAt), asc(exhibits.foundAt), asc(exhibits.id)];
+
+function pages(total: number, size: number) { return total ? Math.max(1, Math.ceil(total / size)) : 0; }
+
+export async function listEx10(page = 1, pageSize = 20, filters: BrowseFilters = {}, db: DB = getDb()): Promise<PageResult> {
+  const conds = [];
+  if (filters.form) conds.push(eq(exhibits.formType, filters.form));
+  if (filters.cik) conds.push(eq(exhibits.cik, filters.cik));
+  if (filters.filer) conds.push(sql`json_extract(${exhibits.filingMetadata}, '$.company_name') LIKE ${'%' + filters.filer + '%'} COLLATE NOCASE`);
+  const where = conds.length ? and(...conds) : undefined;
+  const total = (await db.select({ n: count() }).from(exhibits).where(where))[0]?.n ?? 0;
+  const rows = await db.select(summaryCols).from(exhibits).where(where)
+    .orderBy(...(filters.sort === 'oldest' ? orderOldest : orderNewest))
+    .limit(pageSize).offset((page - 1) * pageSize);
+  return { items: rows.map(rowToSummary), total, page, page_size: pageSize, total_pages: pages(total, pageSize) };
 }
 
-export function ex10Stats(): Promise<Stats> {
-  return getJson<Stats>('/api/stats', {
-    total: 0,
-    with_markdown: 0,
-    pending_markdown: 0,
-    last_24h: 0,
-    by_doc_type: {},
-    by_form_type: {},
-  });
+export async function ex10Facets(db: DB = getDb()): Promise<{ forms: FormFacet[] }> {
+  const rows = await db.select({ form_type: exhibits.formType, count: count() }).from(exhibits)
+    .where(sql`${exhibits.formType} IS NOT NULL AND ${exhibits.formType} <> ''`)
+    .groupBy(exhibits.formType).orderBy(desc(count()), asc(exhibits.formType));
+  return { forms: rows as FormFacet[] };
 }
 
-/** Build-time helper: page through the whole collection for prerendering. */
-export async function listAllEx10(pageSize = 100, max = 5000): Promise<Ex10Summary[]> {
-  const all: Ex10Summary[] = [];
-  let page = 1;
-  while (all.length < max) {
-    const res = await listEx10(page, pageSize);
-    all.push(...res.items);
-    if (res.items.length === 0 || page >= res.total_pages) break;
-    page += 1;
-  }
-  return all;
+export async function ex10Since(seconds = 60, db: DB = getDb()): Promise<{ window_seconds: number; count: number; items: Ex10Summary[] }> {
+  const rows = await db.select(summaryCols).from(exhibits)
+    .where(sql`${exhibits.foundAt} >= datetime('now', ${'-' + Math.trunc(seconds) + ' seconds'})`)
+    .orderBy(...orderNewest);
+  const items = rows.map(rowToSummary);
+  return { window_seconds: seconds, count: items.length, items };
+}
+
+export async function ex10Detail(id: number | string, db: DB = getDb()): Promise<Ex10Detail | null> {
+  const row = (await db.select().from(exhibits).where(eq(exhibits.id, Number(id))).limit(1))[0];
+  if (!row) return null;
+  return { ...rowToSummary(row), sequence: row.sequence ?? '', markdown: row.markdown ?? '',
+           filing: parseFiling(row.filingMetadata) as FilingHeader, image_urls: parseImageUrls(row.imageUrls) };
+}
+
+export async function ex10Search(query: string, page = 1, pageSize = 20, db: DB = getDb()): Promise<SearchResult> {
+  const q = (query ?? '').trim();
+  if (!q) return { query: '', items: [], total: 0, page, page_size: pageSize, total_pages: 0 };
+  const like = `%${q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
+  const cond = sql`(${exhibits.description} LIKE ${like} ESCAPE '\\' COLLATE NOCASE OR ${exhibits.markdown} LIKE ${like} ESCAPE '\\' COLLATE NOCASE)`;
+  const total = (await db.select({ n: count() }).from(exhibits).where(cond))[0]?.n ?? 0;
+  const rows = await db.select(summaryCols).from(exhibits).where(cond).orderBy(...orderNewest)
+    .limit(pageSize).offset((page - 1) * pageSize);
+  return { query: q, items: rows.map(rowToSummary), total, page, page_size: pageSize, total_pages: pages(total, pageSize) };
+}
+
+export async function ex10Stats(db: DB = getDb()): Promise<Stats> {
+  const c = async (w?: ReturnType<typeof sql>) => (await db.select({ n: count() }).from(exhibits).where(w))[0]?.n ?? 0;
+  const total = await c();
+  const with_markdown = await c(eq(exhibits.markdownStatus, 'done'));
+  const pending_markdown = await c(sql`${exhibits.markdownStatus} IS NULL OR ${exhibits.markdownStatus} = 'pending'`);
+  const last_24h = await c(sql`${exhibits.foundAt} >= datetime('now','-1 day')`);
+  const byForm = await db.select({ k: exhibits.formType, c: count() }).from(exhibits).groupBy(exhibits.formType);
+  const byDoc = await db.select({ k: exhibits.docType, c: count() }).from(exhibits).groupBy(exhibits.docType);
+  return { total, with_markdown, pending_markdown, last_24h,
+           by_form_type: Object.fromEntries(byForm.map((r) => [r.k ?? '', r.c])),
+           by_doc_type: Object.fromEntries(byDoc.map((r) => [r.k ?? '', r.c])) };
 }
