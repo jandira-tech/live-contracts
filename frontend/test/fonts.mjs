@@ -113,5 +113,7 @@ assert(!manropeUrl.includes('Departure') && !/family=Departure/i.test(base),
 if (failures) {
   console.error(`\n${failures} font check(s) failed`);
   process.exit(1);
+}
 
 console.log('\nAll font checks passed');
+
