@@ -37,8 +37,10 @@ def _as_text(content) -> str:
 class BackfillWorker:
     def __init__(self, db: Database, *, fetcher=None, convert_fn=convert_html_to_markdown,
                  metadata_fetcher=None, request_delay: float = 0.12, sleep_fn=time.sleep,
-                 image_token: str | None = None, image_repo: str | None = None, image_capture_fn=None):
+                 image_token: str | None = None, image_repo: str | None = None, image_capture_fn=None,
+                 image_max_attempts: int = 5):
         self.db = db
+        self.image_max_attempts = image_max_attempts
         # fetcher(accession, cik, filename) -> raw document content (str/bytes) or ""
         self.fetcher = fetcher or self._datamule_fetcher
         # metadata_fetcher(accession, cik) -> compact filing header dict
@@ -131,11 +133,13 @@ class BackfillWorker:
                 urls = self._capture_images(row["accession"], row["cik"], only)
             except Exception as exc:  # noqa: BLE001 - isolate each row
                 logger.warning("image capture failed for %s: %s", row["accession"], exc)
-                continue  # leave image_urls NULL -> retried next cycle, not marked permanently
+                urls = []
             if urls:
                 self.db.update_image_urls(row["id"], urls)
                 captured += 1
-            # else: nothing captured (transient/none) -> leave NULL so it retries
+            else:
+                if self.db.bump_image_attempts(row["id"]) >= self.image_max_attempts:
+                    self.db.update_image_urls(row["id"], [])   # give up -> finalizes
         return captured
 
     # --- live fetch ---------------------------------------------------------
