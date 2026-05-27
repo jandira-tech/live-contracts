@@ -13,13 +13,8 @@ export default defineConfig({
   }),
   env: {
     schema: {
-      // Internal FastAPI origin — reachable only from the Worker (private network
-      // / Cloudflare Tunnel). Never exposed publicly.
-      SEC_API_URL: envField.string({
-        context: 'server',
-        access: 'secret',
-        default: 'https://arthrod-sec-ex10-api.hf.space',
-      }),
+      // Read path is now D1 (Drizzle over the `DB` binding); SEC_API_URL is gone.
+      // SEC_API_KEY is kept: PR3's /api/ingest reuses it to gate writes.
       SEC_API_KEY: envField.string({
         context: 'server',
         access: 'secret',
