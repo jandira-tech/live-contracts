@@ -16,6 +16,12 @@
   "kv_namespaces": [
     { "binding": "SESSION", "id": "f3559549c63e48cf8af7500331ceb1cf" }
   ],
+  // D1 is the durable, authoritative EX-10 content store (read by the Worker
+  // via Drizzle over the `DB` binding; written by the HF worker through
+  // /api/ingest). Created via `wrangler d1 create sec-ex10`.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "sec-ex10", "database_id": "dfb55595-bebe-4d5f-80e6-658538ad3da8" }
+  ],
   // The backend API runs as a Hugging Face Space (key-gated). The Worker fetches
   // it at request time and caches at the edge (CDN + stale-while-revalidate).
   // SEC_API_KEY is a secret: `wrangler secret put SEC_API_KEY`.
