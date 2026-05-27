@@ -27,6 +27,7 @@ class Config:
     api_host: str = "127.0.0.1"
     api_port: int = 8799
     api_key: str | None = None
+    d1_ingest_url: str = "https://live-contracts.arthur.law/api/ingest"
 
     @property
     def min_request_interval(self) -> float:
@@ -46,4 +47,5 @@ class Config:
             api_host=os.environ.get("SEC_API_HOST", "127.0.0.1"),
             api_port=int(os.environ.get("SEC_API_PORT", "8799")),
             api_key=os.environ.get("SEC_API_KEY") or None,
+            d1_ingest_url=os.environ.get("D1_INGEST_URL", "https://live-contracts.arthur.law/api/ingest"),
         )
