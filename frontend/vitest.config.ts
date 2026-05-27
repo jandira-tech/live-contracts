@@ -11,7 +11,9 @@ export default defineConfig({
       // Override the wrangler `main` (a package path the pool can't resolve) with
       // a local stub — unit tests call lib/api fns directly, never dispatch fetch.
       main: './test/worker-stub.ts',
-      miniflare: { d1Databases: { DB: 'sec-ex10-test' } },
+      // SEC_API_KEY: the ingest route reads it from `cloudflare:workers` env
+      // (Astro v6 removed locals.runtime.env), so the auth tests need it here.
+      miniflare: { d1Databases: { DB: 'sec-ex10-test' }, bindings: { SEC_API_KEY: 'secret' } },
       wrangler: { configPath: './wrangler.jsonc' },
     }),
   ],

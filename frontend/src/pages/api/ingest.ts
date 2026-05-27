@@ -1,4 +1,5 @@
 import type { APIContext } from 'astro';
+import { env } from 'cloudflare:workers'; // Astro v6 removed Astro.locals.runtime.env
 import { drizzle } from 'drizzle-orm/d1';
 import { sql } from 'drizzle-orm';
 import * as schema from '../../db/schema';
@@ -33,8 +34,8 @@ const j = (o: unknown, status: number) =>
   new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json' } });
 
 export async function POST(context: APIContext): Promise<Response> {
-  const env = context.locals.runtime.env as Env;
-  if (env.SEC_API_KEY && context.request.headers.get('X-API-Key') !== env.SEC_API_KEY) {
+  const e = env as unknown as Env;
+  if (e.SEC_API_KEY && context.request.headers.get('X-API-Key') !== e.SEC_API_KEY) {
     return j({ error: 'invalid or missing API key' }, 401);
   }
   let body: { rows?: InRow[] };
@@ -44,11 +45,11 @@ export async function POST(context: APIContext): Promise<Response> {
   if (rows.length === 0) return j({ accepted: [] }, 200);
   if (rows.length > 200) return j({ error: 'max 200 rows per batch' }, 400);
 
-  const db = drizzle(env.DB, { schema });
-  // Chunk to stay well under SQLite's bound-variable limit (15 cols * 50 = 750).
+  const db = drizzle(e.DB, { schema });
+  // D1 caps bound parameters at 100 per query; 15 cols * 6 rows = 90 binds.
   const accepted: string[] = [];
-  for (let i = 0; i < rows.length; i += 50) {
-    const chunk = rows.slice(i, i + 50);
+  for (let i = 0; i < rows.length; i += 6) {
+    const chunk = rows.slice(i, i + 6);
     await db.insert(exhibits).values(chunk.map(toInsert))
       .onConflictDoUpdate({ target: [exhibits.accession, exhibits.docType, exhibits.filename], set: CONFLICT_SET });
     for (const r of chunk) accepted.push(r.accession);
