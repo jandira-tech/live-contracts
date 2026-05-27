@@ -1,34 +1,34 @@
 # Deployment
 
-Two halves: the **internal backend** (listener + backfill + key-gated API) and the
-**Cloudflare Worker frontend** (the only public surface, live SSR at the edge). The
-production backend runs as a **Hugging Face Docker Space**; the self-hosted tunnel
-path below is an alternative.
+Two halves: the **backend ingestion worker** (listener + backfill, running on a Hugging Face
+Docker Space) and the **Cloudflare Worker frontend** (the only public surface, live SSR at the
+edge). **Cloudflare D1** is the durable, authoritative store; the frontend reads it directly via
+the `DB` binding, and the backend pushes *finalized* rows to it through `POST /api/ingest`.
 
 ```
-SEC EDGAR ──> [worker: listener + markdown/metadata/image backfill] ──> SQLite
-                                            │                              │
-                                  [FastAPI API, X-API-Key]      HF dataset (mirror + boot-restore)
-                                            │  request-time fetch
+SEC EDGAR ──> [HF Space worker: listener + markdown/metadata/image backfill] ──> working SQLite
+                                            │  finalized rows → POST /api/ingest (X-API-Key)
                                             ▼
-                        [Astro frontend on Cloudflare Workers]  ──CDN/SWR──> live-contracts.arthur.law
+                        [Astro Worker] ──UPSERT──▶ Cloudflare D1 (authoritative)
+                                            ▲  reads via Drizzle binding
+                        live-contracts.arthur.law ◀── CDN/SWR
 ```
 
 ## A. Backend — Hugging Face Space (production)
 
 The Space bundle lives in `deploy/hf-space/` (Docker, port 7860). One process runs the
-listener + backfill + API. See [deploy/hf-space/README.md](./deploy/hf-space/README.md).
+listener + backfill, pushing finalized rows to D1. See [deploy/hf-space/README.md](./deploy/hf-space/README.md).
 
 Space secrets:
 
 | Secret | Purpose |
 |--------|---------|
-| `SEC_API_KEY` | key clients send as `X-API-Key` (same value as the frontend's `SEC_API_KEY`) |
-| `HF_TOKEN` | enables the dataset mirror + boot-restore + image capture |
+| `SEC_API_KEY` | sent as `X-API-Key` to the Worker's `/api/ingest` (same value as the Worker's `SEC_API_KEY` secret) |
+| `HF_TOKEN` | enables scanned-exhibit image capture → HF + the phase-2 dataset export |
 
-HF Spaces have no persistent disk, so on boot the worker restores SQLite from the HF
-dataset (`python -m sec_listener.boot_restore`) and re-mirrors it every
-`SEC_HF_SYNC_INTERVAL` seconds. The Space ships with `seed.db` for instant first content.
+D1 is durable, so there is **no boot-restore** — the Space's SQLite is just a working buffer; on
+restart it reseeds from `seed.db` and re-pushes (idempotent UPSERT). Set `D1_INGEST_URL` (defaults
+to `https://live-contracts.arthur.law/api/ingest`).
 
 ## B. Backend — self-hosted (alternative)
 

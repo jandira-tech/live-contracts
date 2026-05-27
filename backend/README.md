@@ -15,10 +15,10 @@ backend/sec_listener/
   db.py            # SQLite data-access layer (markdown/metadata/image columns + facets)
   listener.py      # orchestration + live polling loop
   api.py           # FastAPI internal API (feed, facets, search, detail, stats)
-  worker.py        # continuous worker: markdown + filing-metadata + image backfill
+  worker.py        # continuous worker: markdown + metadata + image backfill + D1 push loop
   images.py        # scanned-exhibit image capture -> HF dataset (bulk single-commit)
-  hf_sync.py       # parallel SQL mirror of ex10_exhibits to a HF dataset (plan B)
-  boot_restore.py  # cold-start: rebuild SQLite from the HF dataset (HF Spaces has no disk)
+  d1_sync.py       # push *finalized* rows to Cloudflare D1 via the Worker's /api/ingest
+  hf_sync.py       # parquet helpers reused by the phase-2 D1 -> HF public export
 backend/tests/     # pytest suite
 ```
 
@@ -45,12 +45,14 @@ backend/tests/     # pytest suite
 `/api/ex10/since?seconds=`, `/api/ex10/{id}`, `/api/facets`, `/api/search?q=`, `/api/stats`.
 The feed is ordered by actual **filing time** (`filing_metadata.filed_at`, expression-indexed).
 
-## HF dataset mirror (plan B)
+## D1 sync (authoritative store)
 
-With `HF_TOKEN` set, the worker mirrors `ex10_exhibits` to a public HF dataset every
-`SEC_HF_SYNC_INTERVAL` seconds. SQLite stays authoritative; the mirror never crashes the
-listener. On cold start (`python -m sec_listener.boot_restore`) SQLite is rebuilt from the
-dataset — this is how the disk-less HF Space recovers its content across restarts.
+Local SQLite is just a working buffer. When a row is **finalized** (markdown terminal +
+filing_metadata present + image_urls resolved), `d1_sync` POSTs it once to the Astro Worker's
+`/api/ingest` (authed with `SEC_API_KEY`), which UPSERTs it into **Cloudflare D1** — the durable,
+authoritative store the frontend reads. Idempotent, so a Space restart (which reseeds from
+`seed.db`) just re-pushes harmlessly; no boot-restore needed. The HF dataset is a phase-2 public
+export from D1 (`scripts/export_d1_to_hf.py`); images still go to HF when `HF_TOKEN` is set.
 
 ## Run
 

@@ -22,37 +22,35 @@ it through a read-only API; an Astro frontend on Cloudflare Workers renders it l
 
 ## Architecture
 
-Two halves. The **backend** is internal — it talks to SEC and its own SQLite only, never the public
-internet. The **frontend** is the only public surface; it reads the key-gated API at request time and
-caches at the edge, so content updates need **no rebuild or redeploy** — only code changes do.
+Two halves. The **backend** is an internal ingestion worker — it talks to SEC and its own working
+SQLite only. **Cloudflare D1** is the durable, authoritative store; the **Astro Worker** is the only
+public surface and reads D1 directly (Drizzle over the `DB` binding), edge-cached, so content updates
+need **no rebuild or redeploy** — only code changes do.
 
 ```
 SEC EDGAR
    │  poll (≤10 rps, backoff)
    ▼
-[worker] listener + markdown backfill + filing-header + image capture
-   │                                   │
-   ▼                                   ▼
-SQLite (authoritative)        HF dataset arthrod/sec-ex10-exhibits  ← parallel SQL mirror (plan B)
-   │                                   ▲
-   ▼                                   └─ boot-restore on cold start (HF Spaces has no disk)
-[FastAPI] read-only, X-API-Key gated  (HF Space: arthrod-sec-ex10-api.hf.space)
-   │  request-time fetch
+[HF Space worker] listener + markdown / filing-header / image backfill → working SQLite
+   │  when a row is FINALIZED, POST it once (idempotent, X-API-Key)
    ▼
-[Astro SSR on Cloudflare Workers]  ──CDN / stale-while-revalidate──▶  live-contracts.arthur.law
+[Astro Worker] POST /api/ingest ──UPSERT──▶  Cloudflare D1 (authoritative)
+   ▲                                              │
+   └────────── reads feed / search / facets / detail via Drizzle binding ◀──┘
+   CDN / stale-while-revalidate ──▶  live-contracts.arthur.law
 ```
 
-The HF dataset is a durable, queryable mirror (DuckDB over `hf://`) that doubles as the cold-start
-seed: HF Spaces have no persistent disk, so on boot the worker restores SQLite from the dataset.
+Images stay on Hugging Face as blobs+URLs. The HF dataset `arthrod/sec-ex10-exhibits` is a phase-2
+**public export** from D1 (DuckDB-queryable parquet), not an operational dependency.
 
 ## Layout
 
 ```
-backend/      FastAPI + SQLite listener — see backend/README.md
-frontend/     Astro 6 SSR on Cloudflare Workers — see frontend/README.md
+backend/      ingestion worker (listener + backfill); pushes finalized rows to D1 — see backend/README.md
+frontend/     Astro 6 SSR on Cloudflare Workers, reads D1 via Drizzle — see frontend/README.md
 deploy/
-  hf-space/   Docker Space bundle (the backend, deployed to Hugging Face)
-DEPLOYMENT.md  end-to-end deploy guide (backend + tunnel + Worker)
+  hf-space/   Docker Space bundle (the backend worker, deployed to Hugging Face)
+DEPLOYMENT.md  end-to-end deploy guide (backend worker + D1 + Worker)
 ```
 
 ## API (read-only, `X-API-Key`)
