@@ -197,3 +197,17 @@ def test_backfill_images_noop_without_token(db):
     assert worker.backfill_images_batch(limit=10) == 0
     assert called == []
     assert len(db.exhibits_pending_images(limit=10)) == 1  # untouched -> captured later when token set
+
+
+def test_backfill_images_marks_empty_after_retry_cap(db):
+    import json
+    _add_done(db, "stuck", "(scan_001.jpg)")
+    worker = BackfillWorker(db, image_token="tok", sleep_fn=lambda _: None,
+                            image_capture_fn=lambda a, c, only: [], image_max_attempts=3)
+    worker.backfill_images_batch(limit=10)   # attempt 1 -> still pending
+    worker.backfill_images_batch(limit=10)   # attempt 2 -> still pending (< cap of 3)
+    assert [r["accession"] for r in db.exhibits_pending_images(limit=10)] == ["stuck"]
+    worker.backfill_images_batch(limit=10)   # attempt 3 >= cap -> mark []
+    rows = {r["accession"]: r for r in db.recent_ex10()}
+    assert json.loads(rows["stuck"]["image_urls"]) == []
+    assert db.exhibits_pending_images(limit=10) == []

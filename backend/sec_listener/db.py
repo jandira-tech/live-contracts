@@ -80,6 +80,8 @@ class Database:
             self._ensure_column(conn, "ex10_exhibits", "markdown_status", "TEXT")
             self._ensure_column(conn, "ex10_exhibits", "filing_metadata", "TEXT")
             self._ensure_column(conn, "ex10_exhibits", "image_urls", "TEXT")
+            self._ensure_column(conn, "ex10_exhibits", "mirrored", "INTEGER DEFAULT 0")
+            self._ensure_column(conn, "ex10_exhibits", "image_attempts", "INTEGER DEFAULT 0")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ex10_found_at ON ex10_exhibits(found_at)"
             )
@@ -250,6 +252,36 @@ class Database:
                 inserted += cur.rowcount
             conn.commit()
         return inserted
+
+    def finalized_unmirrored(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT id, accession, cik, form_type, doc_type, filename, description,
+                          sequence, filing_url, found_at,
+                          json_extract(filing_metadata, '$.filed_at') AS filed_at,
+                          markdown_status, filing_metadata, image_urls, markdown
+                   FROM ex10_exhibits
+                   WHERE COALESCE(mirrored, 0) = 0
+                     AND markdown_status IN ('done', 'empty', 'error')
+                     AND filing_metadata IS NOT NULL
+                     AND image_urls IS NOT NULL
+                   ORDER BY id ASC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_mirrored(self, ids: list[int]) -> None:
+        if not ids:
+            return
+        with self.connect() as conn:
+            conn.executemany("UPDATE ex10_exhibits SET mirrored = 1 WHERE id = ?", [(i,) for i in ids])
+            conn.commit()
+
+    def bump_image_attempts(self, exhibit_id: int) -> int:
+        with self.connect() as conn:
+            conn.execute("UPDATE ex10_exhibits SET image_attempts = COALESCE(image_attempts,0)+1 WHERE id = ?", (exhibit_id,))
+            conn.commit()
+            return conn.execute("SELECT image_attempts FROM ex10_exhibits WHERE id = ?", (exhibit_id,)).fetchone()[0]
 
     # --- reads --------------------------------------------------------------
     # List/search payloads only need a short excerpt, so we truncate the markdown
