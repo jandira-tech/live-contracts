@@ -68,11 +68,19 @@ SEC ──> [HF Space Python worker]            (ingestion only — datamule/mar
    is `filed_at DESC NULLS LAST, found_at DESC, id DESC` (unchanged semantics). The FastAPI **read**
    API retires for the frontend.
 
-3. **Astro Worker — ingest route** `POST /api/ingest`.
-   - Auth: `X-API-Key == SEC_API_KEY` (Worker secret) → 401 otherwise.
-   - Body: JSON batch of finalized rows.
+3. **Astro Worker — ingest route** `POST /api/ingest` — *the backend→Cloudflare connection.*
+   - This is a **new write path**: today data flows Worker→HF (reads); D1 reverses it, so the HF
+     Space must reach Cloudflare to land rows. It does so as a plain outbound HTTPS POST to this route
+     (HF Spaces already make outbound HTTPS to SEC, so no new egress/network setup).
+   - Auth: `X-API-Key == SEC_API_KEY` (Worker secret) → 401 otherwise. **The credential already
+     exists on both sides** — the Worker holds `SEC_API_KEY` as a secret and the HF Space already has
+     the same value; the writer just sends the key it already has. No Cloudflare account API token
+     anywhere; D1 access never leaves Cloudflare (binding only).
+   - Body: JSON batch of finalized rows (chunked to stay under the Worker request-size/CPU ceiling).
    - `env.DB.batch([...])` of `INSERT ... ON CONFLICT(accession,filename) DO UPDATE` (idempotent).
    - Returns the accepted accessions so the writer can mark them mirrored.
+   - Route lives on the main Worker (`live-contracts.arthur.law/api/ingest`). Variant (not chosen): a
+     separate `*.workers.dev` ingest Worker bound to the same D1 to keep writes off the public domain.
 
 4. **HF Space Python worker — push finalized rows** (`sec_listener/d1_sync.py`).
    - SQLite gains a `mirrored INTEGER DEFAULT 0` column (`_ensure_column`).
@@ -80,6 +88,8 @@ SEC ──> [HF Space Python worker]            (ingestion only — datamule/mar
      `filing_metadata IS NOT NULL` AND `image_urls IS NOT NULL` AND `mirrored = 0`.
    - Loop (replaces `_hf_sync_loop`): batch finalized rows → POST to `/api/ingest` → on success set
      `mirrored = 1`. Network failure leaves `mirrored = 0` → retried; never crashes ingestion.
+   - Config: `D1_INGEST_URL` (default `https://live-contracts.arthur.law/api/ingest`) + the existing
+     `SEC_API_KEY` (already an HF Space secret). No new credential.
    - **Image retry cap:** image capture currently leaves `image_urls = NULL` and retries forever; a
      row that never captures would never finalize. Add a bounded retry (e.g. `image_attempts`
      column; after N tries set `image_urls = []`) so every row finalizes eventually.
@@ -133,7 +143,9 @@ to `/api/ingest` in batches. This migrates data *and* exercises the ingest endpo
 
 ## Prerequisites / verify during implementation
 
-- **Workers Paid** active on the account (otherwise D1 cap is 500 MB). *(User action.)*
+- **Workers Paid** — ✅ confirmed active (D1 cap is 10 GB).
+- **Backend→Cloudflare connection** — ✅ decided: ingest route on the main Worker, authed with the
+  shared `SEC_API_KEY` (no new Cloudflare token).
 - D1 **FTS5** support — confirm in PR2; `LIKE` fallback if absent.
 - `@cloudflare/vitest-pool-workers` for Worker tests with a real local D1.
 - Astro + Cloudflare adapter exposes the D1 binding at `Astro.locals.runtime.env.DB`.
