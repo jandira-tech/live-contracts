@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { seed, testDb } from './seed';
 import { listEx10, ex10Detail, ex10Facets, ex10Search, ex10Since, ex10Stats } from '../src/lib/api';
+import { exhibits } from '../src/db/schema';
 
 let db: ReturnType<typeof testDb>;
 beforeEach(async () => { await seed(); db = testDb(); });
@@ -32,4 +33,14 @@ it('ex10Facets / ex10Stats', async () => {
   expect(f.forms).toEqual(expect.arrayContaining([{ form_type: '8-K', count: 1 }, { form_type: '10-Q', count: 1 }]));
   const s = await ex10Stats(db);
   expect(s.total).toBe(2); expect(s.with_markdown).toBe(2);
+});
+it('ex10Since includes a fresh row and excludes the old seed rows', async () => {
+  const nowSql = new Date().toISOString().replace('T', ' ').slice(0, 19); // 'YYYY-MM-DD HH:MM:SS'
+  await db.insert(exhibits).values({
+    id: 99, accession: 'fresh', filename: 'n.htm', docType: 'EX-10.9', formType: '8-K',
+    foundAt: nowSql, filedAt: '20260527120000', markdownStatus: 'done',
+    filingMetadata: '{}', imageUrls: '[]', markdown: 'fresh body',
+  });
+  const res = await ex10Since(3600, db);
+  expect(res.items.map((i) => i.accession)).toEqual(['fresh']); // seed rows are months old
 });
