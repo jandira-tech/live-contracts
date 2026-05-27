@@ -18,6 +18,14 @@ if (error || !detail) {
 const html = detail.markdown ? marked.parse(detail.markdown) : '';
 const title = detail.description?.trim() || `${detail.doc_type} — ${detail.filename}`;
 const images = detail.image_urls ?? [];
+
+// One-click hand-off to Cicero: the editor fetches this exhibit's raw markdown
+// (public endpoint) and deserializes it into a new document. Only meaningful
+// when there's markdown to export.
+const mdUrl = `https://live-contracts.arthur.law/api/markdown/${detail.id}`;
+const ciceroUrl = detail.markdown
+  ? `https://cicero.im/editor?importMd=${encodeURIComponent(mdUrl)}`
+  : null;
 const f = detail.filing ?? {};
 const hasFiling = Boolean(f.company_name || f.period || f.file_number || (f.items?.length));
 
@@ -38,6 +46,11 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-re
       <a href={detail.filing_url} rel="noopener" target="_blank">View original filing on SEC EDGAR →</a>
       &nbsp;·&nbsp; seen {formatNY(detail.found_at)}
     </p>
+    {ciceroUrl && (
+      <p class="sl-export">
+        <a class="sl-cicero-pill" href={ciceroUrl} target="_blank" rel="noopener">Export to Cicero →</a>
+      </p>
+    )}
     <hr class="divider" />
   </header>
 
