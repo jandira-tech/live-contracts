@@ -9,12 +9,23 @@
     "preview": "astro preview",
     "check": "astro check",
     "sync": "astro sync",
-    "test:smoke": "node test/smoke.mjs"
+    "test:smoke": "node test/smoke.mjs",
+    "test:unit": "vitest run",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^13.5.4",
     "astro": "^6.3.7",
+    "drizzle-orm": "^0.45.2",
     "marked": "^16.0.0"
   },
-  "trustedDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64"]
+  "trustedDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64"],
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@cloudflare/vitest-pool-workers": "^0.16.10",
+    "@cloudflare/workers-types": "^4.20260527.1",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
 }

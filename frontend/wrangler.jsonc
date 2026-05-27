@@ -16,12 +16,15 @@
   "kv_namespaces": [
     { "binding": "SESSION", "id": "f3559549c63e48cf8af7500331ceb1cf" }
   ],
-  // The backend API runs as a Hugging Face Space (key-gated). The Worker fetches
-  // it at request time and caches at the edge (CDN + stale-while-revalidate).
-  // SEC_API_KEY is a secret: `wrangler secret put SEC_API_KEY`.
-  "vars": {
-    "SEC_API_URL": "https://arthrod-sec-ex10-api.hf.space"
-  },
+  // D1 is the durable, authoritative EX-10 content store (read by the Worker
+  // via Drizzle over the `DB` binding; written by the HF worker through
+  // /api/ingest). Created via `wrangler d1 create sec-ex10`.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "sec-ex10", "database_id": "dfb55595-bebe-4d5f-80e6-658538ad3da8" }
+  ],
+  // SEC_API_KEY is a secret (set via `wrangler secret put SEC_API_KEY`); PR3's
+  // /api/ingest reuses it to gate writes. The read path is D1 now, so the
+  // former SEC_API_URL var is removed.
   // Public custom domain (the arthur.law zone is already on this Cloudflare
   // account). `wrangler deploy` provisions the hostname + edge cert; no manual
   // DNS record needed for a Workers custom domain.
