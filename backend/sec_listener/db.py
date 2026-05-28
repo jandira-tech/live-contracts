@@ -200,9 +200,13 @@ class Database:
             conn.commit()
 
     def update_image_urls(self, exhibit_id: int, urls: list[str]) -> None:
+        # Reset mirrored so a row that was already pushed to D1 on markdown+metadata
+        # (image capture is decoupled from the push) is re-queued for a follow-up push,
+        # propagating the freshly captured image_urls via the ingest upsert. A row not
+        # yet mirrored is unaffected (mirrored stays 0).
         with self.connect() as conn:
             conn.execute(
-                "UPDATE ex10_exhibits SET image_urls = ? WHERE id = ?",
+                "UPDATE ex10_exhibits SET image_urls = ?, mirrored = 0 WHERE id = ?",
                 (json.dumps(urls), exhibit_id),
             )
             conn.commit()
