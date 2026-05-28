@@ -23,11 +23,19 @@ const toInsert = (r: InRow): ExhibitInsert => ({
 });
 
 // On (accession, doc_type, filename) conflict, refresh everything except the conflict key.
+// Enrich-only for the progressively-filled columns: COALESCE(excluded.x, x) so an
+// incoming NULL never erases a value already in D1 — a partial/early decoupled push
+// (markdown+metadata before image capture) or a stale reseed re-push must not wipe
+// captured image_urls/markdown/metadata. A real (non-NULL) incoming value still wins.
 const CONFLICT_SET = {
   cik: sql`excluded.cik`, formType: sql`excluded.form_type`,
   description: sql`excluded.description`, sequence: sql`excluded.sequence`, filingUrl: sql`excluded.filing_url`,
-  foundAt: sql`excluded.found_at`, filedAt: sql`excluded.filed_at`, markdownStatus: sql`excluded.markdown_status`,
-  filingMetadata: sql`excluded.filing_metadata`, imageUrls: sql`excluded.image_urls`, markdown: sql`excluded.markdown`,
+  foundAt: sql`excluded.found_at`,
+  filedAt: sql`coalesce(excluded.filed_at, filed_at)`,
+  markdownStatus: sql`coalesce(excluded.markdown_status, markdown_status)`,
+  filingMetadata: sql`coalesce(excluded.filing_metadata, filing_metadata)`,
+  imageUrls: sql`coalesce(excluded.image_urls, image_urls)`,
+  markdown: sql`coalesce(excluded.markdown, markdown)`,
 };
 
 const j = (o: unknown, status: number) =>
