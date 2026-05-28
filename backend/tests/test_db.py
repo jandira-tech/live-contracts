@@ -317,6 +317,26 @@ def test_form_facets_counts(db):
     assert facets == {"8-K": 2, "10-Q": 1}
 
 
+def test_update_image_urls_requeues_mirrored_row_for_repush(tmp_path):
+    """Decoupled push: a row mirrors to D1 on markdown+metadata, *before* images.
+    When image capture later fills image_urls, the row must re-enter the unmirrored
+    queue so a follow-up push propagates the images to D1 (the ingest upsert refreshes
+    image_urls). Without this, images captured after the first push never reach D1."""
+    from sec_listener.db import Database
+    d = Database(str(tmp_path / "repush.db")); d.init()
+    d.save_ex10_exhibit({"accession": "a", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+                         "filename": "a.htm", "description": "", "sequence": "1", "url": "u"},
+                        markdown="body", filing_metadata={"filed_at": "20260501120000"})
+    rid = d.recent_ex10()[0]["id"]
+    # First push happened without waiting for images -> row is mirrored.
+    d.mark_mirrored([rid])
+    assert d.finalized_unmirrored(require_images=False) == []  # mirrored -> not re-selected
+    # Images captured later must re-queue the row for a follow-up push.
+    d.update_image_urls(rid, ["https://hf/x.jpg"])
+    requeued = d.finalized_unmirrored(require_images=False)
+    assert [r["id"] for r in requeued] == [rid]
+
+
 def test_finalized_unmirrored_selects_only_complete_rows(tmp_path):
     from sec_listener.db import Database
     d = Database(str(tmp_path / "f.db")); d.init()

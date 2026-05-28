@@ -199,12 +199,16 @@ class BackfillWorker:
 
 
 async def _d1_push_loop(db: Database, *, url: str, key: str, interval: float,
-                        require_images: bool = True, batch: int = 100):
+                        require_images: bool = False, batch: int = 100):
     """Periodically push *finalized* SQLite rows to D1 via the ingest route.
 
     SQLite stays the working buffer; D1 is authoritative. Failures here never
     disturb the listener/backfill — rows stay unmirrored and retry next cycle.
-    When image capture is off (no HF_TOKEN) rows finalize without image_urls.
+
+    Image capture is **decoupled** from the push: a row finalizes (and pushes) on
+    markdown + metadata alone, so a slow/stalled image backfill never freezes the
+    live feed. When images are captured later, ``update_image_urls`` re-queues the
+    row so a follow-up push propagates them to D1 via the ingest upsert.
     """
     from .d1_sync import push_finalized
 
@@ -236,11 +240,14 @@ async def _run_all(config: Config):
 
     # Push finalized rows to D1 (authoritative store) via the ingest route —
     # gated on the shared SEC_API_KEY. Without it, SQLite is the sole store.
+    # Image capture is decoupled from the push (require_images=False default): rows
+    # reach D1 on markdown+metadata, and re-push once images arrive (see
+    # update_image_urls / _d1_push_loop). This keeps the live feed flowing even when
+    # the image backfill is slow or stalled.
     if config.api_key:
         tasks.append(asyncio.create_task(
             _d1_push_loop(db, url=config.d1_ingest_url, key=config.api_key,
-                          interval=float(os.environ.get("SEC_D1_PUSH_INTERVAL", "60")),
-                          require_images=bool(os.environ.get("HF_TOKEN"))),
+                          interval=float(os.environ.get("SEC_D1_PUSH_INTERVAL", "60"))),
             name="d1-push",
         ))
 

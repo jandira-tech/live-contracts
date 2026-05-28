@@ -1,8 +1,10 @@
 """Tests for the markdown backfill worker."""
+import asyncio
+
 import pytest
 
 from sec_listener.db import Database
-from sec_listener.worker import BackfillWorker
+from sec_listener.worker import BackfillWorker, _d1_push_loop
 
 
 @pytest.fixture
@@ -197,6 +199,38 @@ def test_backfill_images_noop_without_token(db):
     assert worker.backfill_images_batch(limit=10) == 0
     assert called == []
     assert len(db.exhibits_pending_images(limit=10)) == 1  # untouched -> captured later when token set
+
+
+async def test_d1_push_loop_pushes_image_less_finalized_rows(db, monkeypatch):
+    """Decoupled feed: the D1 push loop must NOT wait on image capture. A row with
+    markdown + metadata done but image_urls still NULL (images not yet captured) must
+    reach D1 immediately — otherwise a stalled image backfill freezes the live feed."""
+    db.save_ex10_exhibit({"accession": "decoupled", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+                          "filename": "d.htm", "description": "", "sequence": "1", "url": "u"},
+                         markdown="body", filing_metadata={"filed_at": "20260501120000"})
+    # No update_image_urls() call -> image_urls stays NULL.
+
+    posted: list[list[str]] = []
+
+    def fake_poster(url, rows, *, key):
+        posted.append([r["accession"] for r in rows])
+        return [r["id"] for r in rows]
+
+    monkeypatch.setattr("sec_listener.d1_sync._http_poster", fake_poster)
+
+    # Break the (otherwise infinite) loop after its first iteration.
+    import sec_listener.worker as w
+
+    async def stop_sleep(*_a, **_k):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(w.asyncio, "sleep", stop_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _d1_push_loop(db, url="http://w/api/ingest", key="K", interval=60)
+
+    assert posted == [["decoupled"]]                       # pushed despite NULL image_urls
+    assert db.finalized_unmirrored(require_images=False) == []  # and marked mirrored
 
 
 def test_backfill_images_marks_empty_after_retry_cap(db):
