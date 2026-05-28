@@ -8,14 +8,38 @@ import { exhibits, type ExhibitInsert } from '../../db/schema';
 export const prerender = false;
 
 interface InRow {
+  // `id` is the producer's LOCAL SQLite id (volatile — resets on reseed). It is
+  // echoed back in `accepted` so the worker can mark its own rows mirrored, but it
+  // is NOT used as the D1 primary key (that caused cross-reseed PK collisions).
   id: number; accession: string; cik?: string; form_type?: string; doc_type?: string;
   filename: string; description?: string; sequence?: string; filing_url?: string;
   found_at?: string; filed_at?: string; markdown_status?: string;
   filing_metadata?: string; image_urls?: string; markdown?: string;
 }
 
+// UUIDv7: 48-bit big-endian unix-ms timestamp + 74 random bits, version/variant set.
+// Globally unique (no collisions across producer reseeds) and lexicographically
+// time-ordered (sortable like the old autoincrement id). Assigned to NEW rows only;
+// on (accession, doc_type, filename) conflict the existing id is kept (not in the
+// update set), so a row's id is stable across re-pushes.
+function uuidv7(): string {
+  const ms = Date.now();
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  b[0] = Math.floor(ms / 2 ** 40) & 0xff;
+  b[1] = Math.floor(ms / 2 ** 32) & 0xff;
+  b[2] = Math.floor(ms / 2 ** 24) & 0xff;
+  b[3] = Math.floor(ms / 2 ** 16) & 0xff;
+  b[4] = Math.floor(ms / 2 ** 8) & 0xff;
+  b[5] = ms & 0xff;
+  b[6] = (b[6] & 0x0f) | 0x70; // version 7
+  b[8] = (b[8] & 0x3f) | 0x80; // variant 10
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 const toInsert = (r: InRow): ExhibitInsert => ({
-  id: r.id, accession: r.accession, cik: r.cik ?? null, formType: r.form_type ?? null,
+  id: uuidv7(), accession: r.accession, cik: r.cik ?? null, formType: r.form_type ?? null,
   docType: r.doc_type ?? null, filename: r.filename, description: r.description ?? null,
   sequence: r.sequence ?? null, filingUrl: r.filing_url ?? null, foundAt: r.found_at ?? null,
   filedAt: r.filed_at ?? null, markdownStatus: r.markdown_status ?? null,

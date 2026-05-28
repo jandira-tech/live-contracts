@@ -1,11 +1,14 @@
-import { sqliteTable, integer, text, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // Mirrors the SQLite ex10_exhibits table. filed_at is stored explicitly
 // (extracted from filing_metadata.filed_at at ingest) so it can be indexed.
 export const exhibits = sqliteTable(
   'exhibits',
   {
-    id: integer('id').primaryKey(),
+    // UUIDv7 string, assigned by /api/ingest. The producer's local SQLite id is
+    // volatile (resets on reseed) and collided with existing rows when used as the
+    // D1 PK; a UUIDv7 is globally unique and time-ordered (sortable).
+    id: text('id').primaryKey(),
     accession: text('accession').notNull(),
     cik: text('cik'),
     formType: text('form_type'),

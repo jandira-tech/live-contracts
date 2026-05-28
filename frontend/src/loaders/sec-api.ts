@@ -16,7 +16,7 @@ export interface AgreementsCollectionFilter {
 }
 
 export interface AgreementEntryFilter {
-  id: string | number;
+  id: string;
 }
 
 type Data = Ex10Summary | Ex10Detail;
