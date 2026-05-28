@@ -35,6 +35,24 @@ it('upserts and is idempotent', async () => {
   const all = await db.select().from(exhibits);
   expect(all.filter((r) => r.accession === 'acc-5').length).toBe(1);  // no dup
 });
+it('enrich-only: a NULL-image re-push must not clobber image_urls/markdown already in D1', async () => {
+  // First push: a fully captured row (images + markdown present).
+  await POST(ctx({ rows: [{ ...ROW, image_urls: '["https://hf/x.jpg"]', markdown: 'full body' }] }, 'secret'));
+  // Re-push the SAME key with NULLs (a reseed / early decoupled push before image capture).
+  await POST(ctx({ rows: [{ ...ROW, image_urls: null, markdown: null }] }, 'secret'));
+  const db = testDb();
+  const row = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0];
+  expect(row.imageUrls).toBe('["https://hf/x.jpg"]'); // preserved, NOT clobbered to NULL
+  expect(row.markdown).toBe('full body');             // preserved
+});
+it('a real (non-NULL) incoming value still wins over the existing one', async () => {
+  await POST(ctx({ rows: [{ ...ROW, image_urls: '[]', markdown: 'old' }] }, 'secret'));
+  await POST(ctx({ rows: [{ ...ROW, image_urls: '["https://hf/new.jpg"]', markdown: 'new' }] }, 'secret'));
+  const db = testDb();
+  const row = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0];
+  expect(row.imageUrls).toBe('["https://hf/new.jpg"]'); // non-NULL incoming wins
+  expect(row.markdown).toBe('new');
+});
 it('round-trip: an ingested row is visible via the read layer', async () => {
   await POST(ctx({ rows: [ROW] }, 'secret'));
   const { listEx10 } = await import('../src/lib/api');
