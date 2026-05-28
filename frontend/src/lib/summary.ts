@@ -31,7 +31,7 @@ export function parseImageUrls(raw: string | null | undefined): string[] {
 export function rowToSummary(r: Partial<ExhibitRow>): Ex10Summary {
   const filing = parseFiling(r.filingMetadata ?? null);
   return {
-    id: Number(r.id), accession: r.accession ?? '', cik: r.cik ?? '',
+    id: String(r.id ?? ''), accession: r.accession ?? '', cik: r.cik ?? '',
     form_type: r.formType ?? '', doc_type: r.docType ?? '', filename: r.filename ?? '',
     description: r.description ?? '', filing_url: r.filingUrl ?? '', found_at: r.foundAt ?? '',
     markdown_status: r.markdownStatus ?? '',

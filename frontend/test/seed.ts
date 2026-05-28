@@ -25,14 +25,14 @@ export async function seed() {
   const db = testDb();
   await db.insert(schema.exhibits).values([
     {
-      id: 1, accession: 'acc-1', cik: '111', formType: '8-K', docType: 'EX-10.1',
+      id: '1', accession: 'acc-1', cik: '111', formType: '8-K', docType: 'EX-10.1',
       filename: 'a.htm', description: 'Alpha agreement', sequence: '1', filingUrl: 'https://sec/a',
       foundAt: '2026-05-01T00:00:00', filedAt: '20260501120000', markdownStatus: 'done',
       filingMetadata: JSON.stringify({ company_name: 'Alpha Corp', filed_at: '20260501120000', items: [] }),
       imageUrls: '[]', markdown: 'Alpha contract body about leasing.',
     },
     {
-      id: 2, accession: 'acc-2', cik: '222', formType: '10-Q', docType: 'EX-10.2',
+      id: '2', accession: 'acc-2', cik: '222', formType: '10-Q', docType: 'EX-10.2',
       filename: 'b.htm', description: 'Beta agreement', sequence: '1', filingUrl: 'https://sec/b',
       foundAt: '2026-05-02T00:00:00', filedAt: '20260502120000', markdownStatus: 'done',
       filingMetadata: JSON.stringify({ company_name: 'Beta LLC', filed_at: '20260502120000', items: [] }),

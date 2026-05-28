@@ -53,6 +53,38 @@ it('a real (non-NULL) incoming value still wins over the existing one', async ()
   expect(row.imageUrls).toBe('["https://hf/new.jpg"]'); // non-NULL incoming wins
   expect(row.markdown).toBe('new');
 });
+const UUIDV7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+it('assigns a UUIDv7 string id to a new row (not the worker-supplied id)', async () => {
+  await POST(ctx({ rows: [{ ...ROW, id: 5 }] }, 'secret'));
+  const db = testDb();
+  const row = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0];
+  expect(typeof row.id).toBe('string');
+  expect(row.id).toMatch(UUIDV7);
+  expect(row.id).not.toBe('5');                 // the volatile worker id is NOT the PK
+});
+it('no PK collision when the worker reuses an id across distinct rows (the reseed bug)', async () => {
+  // Same worker id (1) on two DIFFERENT exhibits — used to throw a PRIMARY KEY conflict.
+  const res = await POST(ctx({ rows: [
+    { ...ROW, id: 1, accession: 'a1', filename: 'f1.htm' },
+    { ...ROW, id: 1, accession: 'a2', filename: 'f2.htm' },
+  ] }, 'secret'));
+  expect(res.status).toBe(200);
+  const db = testDb();
+  const r1 = (await db.select().from(exhibits).where(eq(exhibits.accession, 'a1')))[0];
+  const r2 = (await db.select().from(exhibits).where(eq(exhibits.accession, 'a2')))[0];
+  expect(r1.id).toMatch(UUIDV7);
+  expect(r2.id).toMatch(UUIDV7);
+  expect(r1.id).not.toBe(r2.id);                // distinct uuids, both inserted
+});
+it('re-push of the same row keeps its assigned id (stable across pushes)', async () => {
+  await POST(ctx({ rows: [{ ...ROW, id: 7 }] }, 'secret'));
+  const db = testDb();
+  const before = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0].id;
+  await POST(ctx({ rows: [{ ...ROW, id: 7, markdown: 'v2' }] }, 'secret'));
+  const after = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0].id;
+  expect(after).toBe(before);                   // id assigned once, kept on conflict-update
+});
 it('round-trip: an ingested row is visible via the read layer', async () => {
   await POST(ctx({ rows: [ROW] }, 'secret'));
   const { listEx10 } = await import('../src/lib/api');

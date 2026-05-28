@@ -23,7 +23,7 @@ export interface FilingHeader {
 }
 
 export interface Ex10Summary {
-  id: number;
+  id: string;
   accession: string;
   cik: string;
   form_type: string;
@@ -124,8 +124,8 @@ export async function ex10Since(seconds = 60, db: DB = getDb()): Promise<{ windo
   return { window_seconds: seconds, count: items.length, items };
 }
 
-export async function ex10Detail(id: number | string, db: DB = getDb()): Promise<Ex10Detail | null> {
-  const row = (await db.select().from(exhibits).where(eq(exhibits.id, Number(id))).limit(1))[0];
+export async function ex10Detail(id: string, db: DB = getDb()): Promise<Ex10Detail | null> {
+  const row = (await db.select().from(exhibits).where(eq(exhibits.id, String(id))).limit(1))[0];
   if (!row) return null;
   return { ...rowToSummary(row), sequence: row.sequence ?? '', markdown: row.markdown ?? '',
            filing: parseFiling(row.filingMetadata) as FilingHeader, image_urls: parseImageUrls(row.imageUrls) };
