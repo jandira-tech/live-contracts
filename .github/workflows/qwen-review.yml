@@ -1,0 +1,116 @@
+name: qwen-review
+
+# Self-hosted PR review using Alibaba Bailian Coding Plan (Qwen3.6 Plus) via opencode.
+# Two INDEPENDENT jobs:
+#   - static:   fast static analysis (Python/TS/Rust). Report-only, never blocks.
+#   - opencode: LLM review with Qwen3.6 Plus. Has NO `needs:` on static, so it
+#               runs no matter what — even if static fails or is skipped.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+  id-token: write
+
+concurrency:
+  group: qwen-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Static analysis — quick tools only (uv / bun / cargo). Advisory: every step
+  # is `|| true` so this job is informational and can never block the LLM review.
+  # ---------------------------------------------------------------------------
+  static:
+    name: Static analysis (uv / bun / cargo)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Python — ruff (lint + format check)
+        run: |
+          if git ls-files '*.py' | grep -q .; then
+            echo "::group::ruff check"
+            uvx ruff check --output-format=github . || true
+            echo "::endgroup::"
+            echo "::group::ruff format --check"
+            uvx ruff format --check . || true
+            echo "::endgroup::"
+          else
+            echo "No Python files; skipping."
+          fi
+
+      - name: TypeScript / JavaScript — biome + tsc
+        run: |
+          if git ls-files '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' | grep -q .; then
+            echo "::group::biome ci"
+            bunx --bun @biomejs/biome ci --diagnostic-level=error . || true
+            echo "::endgroup::"
+            if [ -f tsconfig.json ]; then
+              echo "::group::tsc --noEmit"
+              bunx --bun typescript tsc --noEmit || true
+              echo "::endgroup::"
+            fi
+          else
+            echo "No TS/JS files; skipping."
+          fi
+
+      - name: Rust — fmt + clippy
+        run: |
+          if git ls-files '*.rs' | grep -q .; then
+            rustup component add clippy rustfmt 2>/dev/null || true
+            echo "::group::cargo fmt --check"
+            cargo fmt --all --check || true
+            echo "::endgroup::"
+            echo "::group::cargo clippy"
+            cargo clippy --all-targets --all-features -- -W clippy::all || true
+            echo "::endgroup::"
+          else
+            echo "No Rust files; skipping."
+          fi
+
+  # ---------------------------------------------------------------------------
+  # LLM review — Qwen3.6 Plus via opencode + the Bailian OpenAI-compatible API.
+  # Independent job (no `needs:`): runs even when `static` fails.
+  # ---------------------------------------------------------------------------
+  opencode:
+    name: opencode review (Qwen3.6 Plus)
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Run opencode
+        uses: anomalyco/opencode/github@latest
+        env:
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          model: dashscope/qwen3.6-plus
+          use_github_token: true
+          share: "false"
+          prompt: |
+            Review this pull request as a senior engineer. Be concise and specific.
+            - Flag correctness bugs, security issues, and data-loss risks first.
+            - Note Python / TypeScript / Rust issues a linter would miss (logic, API misuse, races).
+            - Call out missing tests for changed behavior.
+            - Skip nitpicks already covered by formatters/linters.
+            Post a single review comment grouped by severity (Blocking / Should-fix / Nit).
