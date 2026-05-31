@@ -31,7 +31,7 @@ impl Config {
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
         Config {
-            ingest_url: get("SEC_INGEST_URL")
+            ingest_url: get("D1_INGEST_URL")
                 .unwrap_or_else(|| "https://live-contracts.arthur.law/api/ingest".into()),
             api_key: get("SEC_API_KEY").unwrap_or_default(),
             hf_token: get("HF_TOKEN"),
@@ -79,6 +79,7 @@ mod tests {
     fn reads_overrides_and_caps_batch() {
         let m = map(&[
             ("SEC_API_KEY", "k"),
+            ("D1_INGEST_URL", "https://example.com/api/ingest"),
             ("SEC_PUSH_BATCH", "500"),
             ("SEC_CONCURRENCY", "4"),
             ("PORT", "9090"),
@@ -86,6 +87,7 @@ mod tests {
             ("HF_TOKEN", "hf_x"),
         ]);
         let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.ingest_url, "https://example.com/api/ingest"); // D1_INGEST_URL, not SEC_INGEST_URL
         assert_eq!(cfg.push_batch, 200); // capped at 200
         assert_eq!(cfg.concurrency, 4);
         assert_eq!(cfg.port, 9090);

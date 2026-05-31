@@ -138,7 +138,7 @@ pub async fn process_submission(
     build_records(
         id_counter,
         &accession_str,
-        &secinfra::format_accession_int(cik, "nodash"),
+        &cik.to_string(),
         &sub.submission_type,
         &f_url,
         &found_at,
