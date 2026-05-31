@@ -1,4 +1,5 @@
 mod classify;
+mod extract;
 mod header;
 mod images;
 mod ingest;
