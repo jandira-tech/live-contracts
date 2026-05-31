@@ -23,8 +23,11 @@ Decisions captured during brainstorming:
 - **Parallel now, cut over later.** Keep `arthrod/sec-*` naming, new instances.
 - **Fresh empty D1** for the new stack.
 - **No new HF dataset.** "conejo-code" was a stray skill reference, dropped from scope.
-- Rust crate lives in **`backend-rust/`** in this repo; `secinfra` pulled as a git dependency.
-- Markdown via **`htmd`** (HTML) **plus a PDF text crate** for PDF exhibits.
+- Rust crate lives in **`backend-rust/`** in this repo; **`secinfra` source is
+  vendored in** (copied under `backend-rust/vendor/secinfra/`, including its C
+  SGML `vendor/secsgmlc/` + `build.rs`) — no external git dependency at build time.
+- Markdown via **`htmd`** (HTML-only). PDF/DOCX exhibits are a known delta
+  (→ `empty` status); the image path catches scanned ones.
 
 ## 2. Topology
 
@@ -134,8 +137,8 @@ empty-default header.
 ### 3.6 Markdown (`converter.py` → Rust)
 
 - HTML exhibits → `htmd` crate (HTML→Markdown). Output trimmed.
-- PDF exhibits → a Rust PDF text-extraction crate (e.g. `pdf-extract`);
-  best-effort plain text.
+- PDF/DOCX exhibits → not converted (out of scope); they yield no text →
+  `empty` status, and the image path catches scanned/image-only ones.
 - Empty/None input → `""`. Conversion failure → `""` (never panics).
 - Status: non-empty result → `done`; fetched-but-empty result → `empty`;
   fetch/convert error → `error`.
@@ -237,10 +240,10 @@ These are exactly the three values the frontend already renders.
   `CMD ["sec-ex10-rust"]`.
 - **`backend-rust/README.md`** — HF Space front-matter (`sdk: docker`,
   `app_port: 7860`, title/emoji).
-- **`backend-rust/Cargo.toml`** — `secinfra` as git dep
-  (`secinfra = { git = "https://github.com/arthrod/secinfra-rust" }`), plus
-  `tokio`, `reqwest` (rustls), `axum`, `serde`/`serde_json`, `htmd`, a PDF crate,
-  `tracing`, `futures`, `anyhow`.
+- **`backend-rust/Cargo.toml`** — `secinfra` as a **path dependency** to the
+  vendored copy (`secinfra = { path = "vendor/secinfra" }`), plus `tokio`,
+  `reqwest` (rustls), `axum`, `serde`/`serde_json`, `htmd`, `tracing`, `futures`,
+  `anyhow`. The vendored `secinfra` keeps its own `Cargo.toml` and `build.rs`.
 - **`frontend/wrangler.v2.jsonc`** — copy of `wrangler.jsonc` with:
   `name: "sec-ex10-frontend-v2"`, the **new** D1 `database_id`, **no**
   `routes`/custom_domain block (use the `*.workers.dev` URL), its own
@@ -280,8 +283,9 @@ These are exactly the three values the frontend already renders.
 
 - **No SQLite durability.** In-memory dedup only; restart re-streams recent
   filings and re-pushes (idempotent — harmless).
-- **Markdown engine differs.** `htmd` (HTML) + PDF crate replaces `markitdown`;
-  DOCX exhibits (very rare for EX-10) are not converted → `empty` status.
+- **Markdown engine differs.** `htmd` (HTML-only) replaces `markitdown`; PDF and
+  DOCX exhibits (rare for EX-10) are not converted → `empty` status (image path
+  still catches scanned/image-only exhibits).
 - **No DNS cutover.** Live `live-contracts.arthur.law` and the Python Space are
   untouched. Cutover (point the route at the v2 worker, retire the Python Space)
   is a separate, later change.
