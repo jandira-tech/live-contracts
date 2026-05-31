@@ -1,6 +1,7 @@
 mod classify;
 mod header;
 mod images;
+mod ingest;
 mod markdown;
 
 fn main() {
