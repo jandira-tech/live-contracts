@@ -73,6 +73,12 @@ fn main() {
         .init();
 
     let cfg = Config::from_env();
+    // Fail fast on an unusable discovery config rather than panicking the spawned
+    // pipeline task (secinfra::Monitor::build asserts at least one source on).
+    if let Err(e) = cfg.validate() {
+        tracing::error!("invalid configuration: {e}");
+        std::process::exit(2);
+    }
     tracing::info!("starting sec-ex10-rust on port {}", cfg.port);
 
     let total_seen = Arc::new(AtomicU64::new(0));

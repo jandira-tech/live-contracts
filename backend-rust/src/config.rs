@@ -23,6 +23,21 @@ impl Config {
         Self::from_map(|k| env::var(k).ok())
     }
 
+    /// At least one discovery source must be enabled — `secinfra::Monitor::build()`
+    /// asserts `use_rss || use_efts` and would panic otherwise. Call this at
+    /// startup so a both-disabled env fails fast with a clear message instead of
+    /// silently killing the spawned pipeline task.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.use_rss && !self.use_efts {
+            return Err(
+                "SEC_USE_RSS and SEC_USE_EFTS are both disabled — enable at least one \
+                 discovery source"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
     pub fn from_map<G>(get: G) -> Self
     where
         G: Fn(&str) -> Option<String>,
@@ -117,5 +132,25 @@ mod tests {
         let cfg = Config::from_map(|k| only_rss.get(k).cloned());
         assert!(cfg.use_rss);
         assert!(!cfg.use_efts);
+    }
+
+    #[test]
+    fn validate_rejects_both_discovery_sources_disabled() {
+        // secinfra::Monitor::build() asserts at least one source — guard before it
+        // so a both-false env fails fast at startup instead of panicking a spawned
+        // pipeline task. (gemini/qodo on PR #49.)
+        let both_off = map(&[("SEC_API_KEY", "k"), ("SEC_USE_RSS", "0"), ("SEC_USE_EFTS", "false")]);
+        let cfg = Config::from_map(|k| both_off.get(k).cloned());
+        assert!(cfg.validate().is_err());
+
+        // Either source on → valid.
+        let one_on = map(&[("SEC_API_KEY", "k"), ("SEC_USE_RSS", "false")]);
+        let cfg = Config::from_map(|k| one_on.get(k).cloned());
+        assert!(cfg.validate().is_ok());
+
+        // Defaults (both on) → valid.
+        let defaults = map(&[("SEC_API_KEY", "k")]);
+        let cfg = Config::from_map(|k| defaults.get(k).cloned());
+        assert!(cfg.validate().is_ok());
     }
 }
