@@ -19,6 +19,12 @@ node_modules/
 *.pid
 ex10_exhibits_export.json
 
+# Secrets / local env (never commit; .env.example is the committed template)
+.env
+*.env
+!*.env.example
+!.env.example
+
 # Astro / Cloudflare build output
 frontend/dist/
 frontend/.astro/
