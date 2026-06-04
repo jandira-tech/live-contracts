@@ -8,10 +8,14 @@ pub struct Config {
     pub hf_token: Option<String>,
     pub image_repo: String,
     pub poll_interval_ms: u64,
-    pub concurrency: usize,
     pub push_batch: usize,
     pub port: u16,
     pub convert_markdown: bool,
+    /// Discovery sources. Mirrors datamule's Monitor, which combines the speed of
+    /// the RSS `getcurrent` feed with the accuracy of EFTS (which sweeps up the
+    /// filings RSS drops). Both default on; secinfra::Monitor requires ≥1 true.
+    pub use_rss: bool,
+    pub use_efts: bool,
 }
 
 impl Config {
@@ -30,6 +34,7 @@ impl Config {
         let convert_markdown = get("SEC_CONVERT_MARKDOWN")
             .map(|v| v != "false" && v != "0")
             .unwrap_or(true);
+        let flag = |key: &str| get(key).map(|v| v != "false" && v != "0").unwrap_or(true);
         Config {
             ingest_url: get("D1_INGEST_URL")
                 .unwrap_or_else(|| "https://live-contracts.arthur.law/api/ingest".into()),
@@ -40,14 +45,13 @@ impl Config {
             poll_interval_ms: get("SEC_POLL_INTERVAL_MS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(200),
-            concurrency: get("SEC_CONCURRENCY")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(8),
             push_batch,
             port: get("PORT")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(7860),
             convert_markdown,
+            use_rss: flag("SEC_USE_RSS"),
+            use_efts: flag("SEC_USE_EFTS"),
         }
     }
 }
@@ -68,11 +72,14 @@ mod tests {
         assert_eq!(cfg.ingest_url, "https://live-contracts.arthur.law/api/ingest");
         assert_eq!(cfg.image_repo, "arthrod/sec-ex10-exhibits");
         assert_eq!(cfg.poll_interval_ms, 200);
-        assert_eq!(cfg.concurrency, 8);
         assert_eq!(cfg.push_batch, 100);
         assert_eq!(cfg.port, 7860);
         assert!(cfg.convert_markdown);
         assert!(cfg.hf_token.is_none());
+        // Mimic datamule: both discovery sources on by default — RSS for speed,
+        // EFTS as the accuracy backstop for the filings the RSS feed drops.
+        assert!(cfg.use_rss);
+        assert!(cfg.use_efts);
     }
 
     #[test]
@@ -81,17 +88,34 @@ mod tests {
             ("SEC_API_KEY", "k"),
             ("D1_INGEST_URL", "https://example.com/api/ingest"),
             ("SEC_PUSH_BATCH", "500"),
-            ("SEC_CONCURRENCY", "4"),
             ("PORT", "9090"),
             ("SEC_CONVERT_MARKDOWN", "false"),
             ("HF_TOKEN", "hf_x"),
+            ("SEC_USE_RSS", "false"),
+            ("SEC_USE_EFTS", "0"),
         ]);
         let cfg = Config::from_map(|k| m.get(k).cloned());
         assert_eq!(cfg.ingest_url, "https://example.com/api/ingest"); // D1_INGEST_URL, not SEC_INGEST_URL
         assert_eq!(cfg.push_batch, 200); // capped at 200
-        assert_eq!(cfg.concurrency, 4);
         assert_eq!(cfg.port, 9090);
         assert!(!cfg.convert_markdown);
         assert_eq!(cfg.hf_token.as_deref(), Some("hf_x"));
+        // Either source can be disabled via env ("false"/"0"); build() still
+        // requires at least one to be true (enforced by secinfra::Monitor).
+        assert!(!cfg.use_rss);
+        assert!(!cfg.use_efts);
+    }
+
+    #[test]
+    fn discovery_sources_default_on_and_toggle_independently() {
+        let only_efts = map(&[("SEC_API_KEY", "k"), ("SEC_USE_RSS", "false")]);
+        let cfg = Config::from_map(|k| only_efts.get(k).cloned());
+        assert!(!cfg.use_rss);
+        assert!(cfg.use_efts); // untouched → still defaults on
+
+        let only_rss = map(&[("SEC_API_KEY", "k"), ("SEC_USE_EFTS", "false")]);
+        let cfg = Config::from_map(|k| only_rss.get(k).cloned());
+        assert!(cfg.use_rss);
+        assert!(!cfg.use_efts);
     }
 }

@@ -20,10 +20,13 @@ async fn run(cfg: Config, state: HealthState) {
         .build()
         .expect("reqwest client");
 
+    // Mimic datamule: RSS (fast, lossy) + EFTS (slower, sweeps up RSS's misses).
+    // Both default on via Config; either can be disabled with SEC_USE_RSS /
+    // SEC_USE_EFTS. secinfra::Monitor::build() panics if neither is enabled.
     let monitor = secinfra::Monitor::new()
         .polling_interval_ms(cfg.poll_interval_ms)
-        .use_rss(false)
-        .use_efts(true)
+        .use_rss(cfg.use_rss)
+        .use_efts(cfg.use_efts)
         .build();
 
     let mut id_counter: u64 = 0u64;
