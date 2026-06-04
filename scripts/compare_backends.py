@@ -12,7 +12,7 @@ Python's deep pre-existing history.
 
 Run:  .venv/bin/python scripts/compare_backends.py
 """
-import json, sqlite3, datetime as dt, pathlib
+import json, sqlite3, datetime as dt, pathlib, sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -36,32 +36,48 @@ def py_filed(row):
 
 # --- Rust captured records ---
 rust = {}
+rust_raw = 0  # total capture lines, to surface dedup (same doc re-sent on restart)
 cap = ROOT / "rust_ingest_capture.jsonl"
 if cap.exists():
     for line in cap.read_text().splitlines():
-        if line.strip():
+        if not line.strip():
+            continue
+        try:
             r = json.loads(line)
-            rust[(r["accession"], r["doc_type"], r["filename"])] = r
+            key = (r["accession"], r["doc_type"], r["filename"])
+        except (json.JSONDecodeError, KeyError) as exc:
+            print(f"warning: skipping malformed capture line: {exc}", file=sys.stderr)
+            continue
+        rust_raw += 1
+        rust[key] = r  # dedupe by doc key — re-sends collapse to one (count surfaced below)
 
 rust_filed = sorted(f for f in (parse_filed(v.get("filed_at")) for v in rust.values()) if f)
 lo, hi = (rust_filed[0], rust_filed[-1]) if rust_filed else (None, None)
 
 # --- Python rows, bounded to Rust's filing-time span ---
-con = sqlite3.connect(ROOT / "ex10_listener.db"); con.row_factory = sqlite3.Row
-py_all = {}
-py_span = {}
-for r in con.execute("SELECT * FROM ex10_exhibits"):
-    d = dict(r); key = (d["accession"], d["doc_type"], d["filename"])
-    py_all[key] = d
-    f = py_filed(d)
-    if lo and hi and f and lo <= f <= hi:
-        py_span[key] = d
+db_path = ROOT / "ex10_listener.db"
+if not db_path.exists():
+    sys.exit(f"error: {db_path} not found — run the Python listener first.")
+con = sqlite3.connect(db_path); con.row_factory = sqlite3.Row
+try:
+    py_all = {}
+    py_span = {}
+    for r in con.execute("SELECT * FROM ex10_exhibits"):
+        d = dict(r); key = (d["accession"], d["doc_type"], d["filename"])
+        py_all[key] = d
+        f = py_filed(d)
+        if lo and hi and f and lo <= f <= hi:
+            py_span[key] = d
+finally:
+    con.close()
 
 now = dt.datetime.now(dt.UTC).strftime("%Y-%m-%d %H:%M:%S")
 print(f"now (UTC): {now}")
 print(f"Rust capture filing span: {lo} .. {hi}")
 print("=" * 64)
-print(f"Rust captured        : {len(rust):>4} EX-10 docs / {len({k[0] for k in rust}):>3} filings")
+_dupes = rust_raw - len(rust)
+print(f"Rust captured        : {len(rust):>4} EX-10 docs / {len({k[0] for k in rust}):>3} filings"
+      + (f"  ({rust_raw} raw lines, {_dupes} re-sent/deduped)" if _dupes else ""))
 print(f"Python (all history) : {len(py_all):>4} EX-10 docs")
 print(f"Python (in Rust span): {len(py_span):>4} EX-10 docs / {len({k[0] for k in py_span}):>3} filings")
 
