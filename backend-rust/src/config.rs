@@ -46,10 +46,9 @@ impl Config {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(100)
             .min(200);
-        let convert_markdown = get("SEC_CONVERT_MARKDOWN")
-            .map(|v| v != "false" && v != "0")
-            .unwrap_or(true);
+        // One place for boolean-like env parsing ("false"/"0" → false, default true).
         let flag = |key: &str| get(key).map(|v| v != "false" && v != "0").unwrap_or(true);
+        let convert_markdown = flag("SEC_CONVERT_MARKDOWN");
         Config {
             ingest_url: get("D1_INGEST_URL")
                 .unwrap_or_else(|| "https://live-contracts.arthur.law/api/ingest".into()),
