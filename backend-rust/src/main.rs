@@ -7,6 +7,7 @@ mod images;
 mod ingest;
 mod markdown;
 mod pipeline;
+mod store;
 
 use config::Config;
 use health::HealthState;
@@ -80,6 +81,22 @@ fn main() {
         std::process::exit(2);
     }
     tracing::info!("starting sec-ex10-rust on port {}", cfg.port);
+
+    // Opt-in stateful mode: open the local SQLite store now so a bad path fails
+    // fast at startup. The pipeline wiring (write/backfill/push/API) lands in the
+    // follow-up PRs; for now confirm it opens and report current coverage.
+    if let Some(path) = cfg.store_path.as_deref() {
+        match store::Store::open(path).and_then(|s| {
+            s.init()?;
+            s.count_ex10().map(|n| (s, n))
+        }) {
+            Ok((_store, n)) => tracing::info!("local store enabled at {path} ({n} EX-10 rows)"),
+            Err(e) => {
+                tracing::error!("failed to open local store at {path}: {e}");
+                std::process::exit(2);
+            }
+        }
+    }
 
     let total_seen = Arc::new(AtomicU64::new(0));
     let state = HealthState {
