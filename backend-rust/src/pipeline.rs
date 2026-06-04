@@ -52,17 +52,45 @@ pub fn build_records(
         .collect()
 }
 
-/// Process one submission end-to-end into ingest records. Never panics.
+/// Result of processing one submission: EX-10 records (with markdown/images) and,
+/// in stateful mode, the metadata of every other exhibit for `all_exhibits`.
+pub struct Processed {
+    pub accession: String,
+    pub cik: String,
+    pub form_type: String,
+    pub ex10: Vec<IngestRecord>,
+    pub others: Vec<IngestRecord>,
+}
+
+impl Processed {
+    fn empty() -> Self {
+        Processed {
+            accession: String::new(),
+            cik: String::new(),
+            form_type: String::new(),
+            ex10: Vec::new(),
+            others: Vec::new(),
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.ex10.is_empty() && self.others.is_empty()
+    }
+}
+
+/// Process one submission end-to-end. Never panics. In stateless mode it returns
+/// only EX-10 records (and skips filings with none); when `cfg.store_path` is set
+/// it also returns every non-EX-10 exhibit's metadata for `all_exhibits`.
 pub async fn process_submission(
     client: &reqwest::Client,
     cfg: &Config,
     id_counter: &mut u64,
     sub: &Submission,
-) -> Vec<IngestRecord> {
+) -> Processed {
     let cik = match sub.ciks.first() {
         Some(c) => *c,
-        None => return Vec::new(),
+        None => return Processed::empty(),
     };
+    let capture_all = cfg.store_path.is_some();
     let accession_str = secinfra::format_accession_int(sub.accession, "dash");
     let f_url = filing_url(sub.accession, cik);
     let found_at = sub.detected_time.to_rfc3339();
@@ -71,7 +99,7 @@ pub async fn process_submission(
         Ok(b) => b,
         Err(e) => {
             tracing::warn!("fetch_sgml failed for {accession_str}: {e}");
-            return Vec::new();
+            return Processed::empty();
         }
     };
 
@@ -81,18 +109,51 @@ pub async fn process_submission(
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!("SGML parse failed for {accession_str}: {e}");
-                return Vec::new();
+                return Processed::empty();
             }
         };
         let g = gather(&parsed);
-        if g.ex10.is_empty() {
-            return Vec::new();
+        // Stateless mode only cares about EX-10; skip filings with none. Stateful
+        // mode records other exhibits too, so process those even without EX-10.
+        if g.ex10.is_empty() && !capture_all {
+            return Processed::empty();
         }
-        let meta = match ParsedSubmissionMetadata::parse(&sgml) {
-            Ok(m) => header_json(&header_events(&m)),
-            Err(_) => header_json(&[]),
+        let meta = if g.ex10.is_empty() {
+            header_json(&[])
+        } else {
+            match ParsedSubmissionMetadata::parse(&sgml) {
+                Ok(m) => header_json(&header_events(&m)),
+                Err(_) => header_json(&[]),
+            }
         };
         (g, meta)
+    };
+
+    // Non-EX-10 exhibits → metadata-only records for all_exhibits (stateful only).
+    let others: Vec<IngestRecord> = if capture_all {
+        gathered
+            .others
+            .iter()
+            .map(|m| IngestRecord {
+                id: 0,
+                accession: accession_str.clone(),
+                cik: cik.to_string(),
+                form_type: sub.submission_type.clone(),
+                doc_type: m.doc_type.clone(),
+                filename: m.filename.clone(),
+                description: m.description.clone(),
+                sequence: m.sequence.clone(),
+                filing_url: f_url.clone(),
+                found_at: found_at.clone(),
+                filed_at: String::new(),
+                markdown_status: String::new(),
+                filing_metadata: None,
+                image_urls: None,
+                markdown: String::new(),
+            })
+            .collect()
+    } else {
+        Vec::new()
     };
 
     let mut results = Vec::new();
@@ -135,7 +196,7 @@ pub async fn process_submission(
         });
     }
 
-    build_records(
+    let ex10 = build_records(
         id_counter,
         &accession_str,
         &cik.to_string(),
@@ -144,7 +205,15 @@ pub async fn process_submission(
         &found_at,
         Some(&meta_json),
         results,
-    )
+    );
+
+    Processed {
+        accession: accession_str,
+        cik: cik.to_string(),
+        form_type: sub.submission_type.clone(),
+        ex10,
+        others,
+    }
 }
 
 #[cfg(test)]
