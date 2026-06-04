@@ -1,0 +1,22 @@
+<SEC-DOCUMENT>0001-25-000001.txt
+<SEC-HEADER>
+ACCESSION NUMBER:		0001-25-000001
+<DOCUMENT>
+<TYPE>EX-10.1
+<SEQUENCE>2
+<FILENAME>ex10-1.htm
+<DESCRIPTION>Material Contract
+<TEXT>
+<html><body><h1>Agreement</h1><p>Terms here.</p></body></html>
+</TEXT>
+</DOCUMENT>
+<DOCUMENT>
+<TYPE>GRAPHIC
+<SEQUENCE>3
+<FILENAME>img1.jpg
+<DESCRIPTION>scan
+<TEXT>
+JFIFbinary-bytes
+</TEXT>
+</DOCUMENT>
+</SEC-DOCUMENT>
