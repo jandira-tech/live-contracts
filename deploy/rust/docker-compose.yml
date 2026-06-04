@@ -1,0 +1,67 @@
+# Deploy the Rust SEC EX-10 backend.
+#
+# It's a PRODUCER: watches SEC EDGAR (datamule-style — RSS `getcurrent` for speed
+# + EFTS for accuracy), extracts EX-10 exhibits, converts to Markdown, and POSTs
+# finalized rows to the D1 ingest route (D1_INGEST_URL). The only inbound surface
+# is `GET /health` on $PORT.
+#
+#   cd deploy/rust
+#   cp .env.example .env      # then fill in SEC_API_KEY (+ HF_TOKEN if wanted)
+#   docker compose up -d --build
+#
+# Your existing Cloudflare tunnel connects into it: the container publishes
+# 127.0.0.1:7860, so add one ingress rule pointing your hostname at
+# http://localhost:7860 (only needed if you want /health reachable externally —
+# the producer makes only outbound calls otherwise).
+
+name: sec-ex10-rust
+
+services:
+  sec-ex10-rust:
+    build:
+      context: ../../backend-rust
+      dockerfile: Dockerfile
+    image: sec-ex10-rust:latest
+    container_name: sec-ex10-rust
+    restart: unless-stopped
+    # Keys are declared here (names visible); values come from deploy/rust/.env
+    # via interpolation. SEC_API_KEY is required — compose fails fast if it's
+    # missing rather than letting the producer run with rejected POSTs.
+    environment:
+      - SEC_API_KEY=${SEC_API_KEY:?set SEC_API_KEY in deploy/rust/.env (shared secret with the ingest route)}
+      - D1_INGEST_URL=${D1_INGEST_URL:-https://live-contracts.arthur.law/api/ingest}
+      - SEC_USE_RSS=${SEC_USE_RSS:-true}
+      - SEC_USE_EFTS=${SEC_USE_EFTS:-true}
+      - SEC_POLL_INTERVAL_MS=${SEC_POLL_INTERVAL_MS:-200}
+      - SEC_CONVERT_MARKDOWN=${SEC_CONVERT_MARKDOWN:-true}
+      - SEC_PUSH_BATCH=${SEC_PUSH_BATCH:-100}
+      - PORT=${PORT:-7860}
+      - RUST_LOG=${RUST_LOG:-info}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - SEC_IMAGE_REPO=${SEC_IMAGE_REPO:-arthrod/sec-ex10-exhibits}
+    # Published to loopback so your existing host cloudflared reaches it at
+    # http://localhost:${HOST_PORT}. (If your tunnel runs as a container instead,
+    # drop this and attach both to a shared Docker network, routing the tunnel at
+    # http://sec-ex10-rust:7860.)
+    #
+    # HOST_PORT is decoupled from the container's PORT: the container runs as a
+    # non-root user (USER 1000) and cannot bind a privileged port (<1024), so keep
+    # PORT >= 1024. Map a privileged HOST_PORT (e.g. 443) if you need one — Docker
+    # binds the host side as root.
+    ports:
+      - "127.0.0.1:${HOST_PORT:-7860}:${PORT:-7860}"
+    # The runtime image is intentionally minimal (no curl/wget), so health is
+    # observed externally via the tunnel hitting /health. To enable an
+    # in-container check, add `curl` to the runtime stage of backend-rust/
+    # Dockerfile and uncomment:
+    # healthcheck:
+    #   test: ["CMD", "curl", "-fsS", "http://localhost:${PORT:-7860}/health"]
+    #   interval: 30s
+    #   timeout: 5s
+    #   retries: 3
+    #   start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
