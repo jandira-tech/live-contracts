@@ -28,12 +28,11 @@ pub fn resolve_filed_at(direct: &str, filing_metadata: Option<&str>) -> String {
     if !direct.is_empty() {
         return direct.to_string();
     }
-    if let Some(meta) = filing_metadata {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(meta) {
-            if let Some(s) = v.get("filed_at").and_then(|x| x.as_str()) {
-                return s.to_string();
-            }
-        }
+    if let Some(meta) = filing_metadata
+        && let Ok(v) = serde_json::from_str::<serde_json::Value>(meta)
+        && let Some(s) = v.get("filed_at").and_then(|x| x.as_str())
+    {
+        return s.to_string();
     }
     String::new()
 }
