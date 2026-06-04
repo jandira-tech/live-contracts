@@ -40,11 +40,16 @@ services:
       - HF_TOKEN=${HF_TOKEN:-}
       - SEC_IMAGE_REPO=${SEC_IMAGE_REPO:-arthrod/sec-ex10-exhibits}
     # Published to loopback so your existing host cloudflared reaches it at
-    # http://localhost:7860. (If your tunnel runs as a container instead, drop
-    # this and attach both to a shared docker network, routing the tunnel at
+    # http://localhost:${HOST_PORT}. (If your tunnel runs as a container instead,
+    # drop this and attach both to a shared Docker network, routing the tunnel at
     # http://sec-ex10-rust:7860.)
+    #
+    # HOST_PORT is decoupled from the container's PORT: the container runs as a
+    # non-root user (USER 1000) and cannot bind a privileged port (<1024), so keep
+    # PORT >= 1024. Map a privileged HOST_PORT (e.g. 443) if you need one — Docker
+    # binds the host side as root.
     ports:
-      - "127.0.0.1:${PORT:-7860}:${PORT:-7860}"
+      - "127.0.0.1:${HOST_PORT:-7860}:${PORT:-7860}"
     # The runtime image is intentionally minimal (no curl/wget), so health is
     # observed externally via the tunnel hitting /health. To enable an
     # in-container check, add `curl` to the runtime stage of backend-rust/

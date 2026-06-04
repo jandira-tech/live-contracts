@@ -29,7 +29,9 @@ has a key, use **that** existing value instead. To set both at once:
 
 ```bash
 KEY=$(openssl rand -hex 32)
-echo "SEC_API_KEY=$KEY" >> .env          # listener side
+# Replace the empty placeholder in-place — don't append with >>, that leaves a
+# duplicate SEC_API_KEY= line and some parsers pick the empty one.
+sed -i "s|^SEC_API_KEY=.*|SEC_API_KEY=$KEY|" .env
 # …and set the same $KEY as the ingest route's secret (e.g. wrangler secret put).
 ```
 
@@ -69,7 +71,7 @@ ingress:
 
 (If your tunnel runs as a *container* rather than on the host, `localhost`
 won't reach the app container — drop the `ports:` publish and put both on a
-shared docker network, then route the tunnel at `http://sec-ex10-rust:7860`.)
+shared Docker network, then route the tunnel at `http://sec-ex10-rust:7860`.)
 
 ## Notes
 
