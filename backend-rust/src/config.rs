@@ -53,7 +53,9 @@ impl Config {
             ingest_url: get("D1_INGEST_URL")
                 .unwrap_or_else(|| "https://live-contracts.arthur.law/api/ingest".into()),
             api_key: get("SEC_API_KEY").unwrap_or_default(),
-            hf_token: get("HF_TOKEN"),
+            // Treat an empty HF_TOKEN as absent — docker-compose always passes the
+            // var, and Some("") would wrongly enable the HF upload path.
+            hf_token: get("HF_TOKEN").filter(|s| !s.is_empty()),
             image_repo: get("SEC_IMAGE_REPO")
                 .unwrap_or_else(|| "arthrod/sec-ex10-exhibits".into()),
             poll_interval_ms: get("SEC_POLL_INTERVAL_MS")
@@ -118,6 +120,20 @@ mod tests {
         // requires at least one to be true (enforced by secinfra::Monitor).
         assert!(!cfg.use_rss);
         assert!(!cfg.use_efts);
+    }
+
+    #[test]
+    fn empty_hf_token_is_treated_as_absent() {
+        // docker-compose always passes HF_TOKEN (empty when left blank). An empty
+        // token must NOT enable the HF upload path — pipeline.rs gates image
+        // capture on hf_token.is_some(). (qodo on PR #50.)
+        let empty = map(&[("SEC_API_KEY", "k"), ("HF_TOKEN", "")]);
+        let cfg = Config::from_map(|k| empty.get(k).cloned());
+        assert!(cfg.hf_token.is_none());
+
+        let present = map(&[("SEC_API_KEY", "k"), ("HF_TOKEN", "hf_x")]);
+        let cfg = Config::from_map(|k| present.get(k).cloned());
+        assert_eq!(cfg.hf_token.as_deref(), Some("hf_x"));
     }
 
     #[test]
