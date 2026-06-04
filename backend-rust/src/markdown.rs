@@ -1,12 +1,11 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MarkdownStatus { Done, Empty, Error }
+pub enum MarkdownStatus { Done, Empty }
 
 impl MarkdownStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             MarkdownStatus::Done => "done",
             MarkdownStatus::Empty => "empty",
-            MarkdownStatus::Error => "error",
         }
     }
 }
@@ -23,7 +22,8 @@ pub fn html_to_markdown(html: &str) -> String {
     }
 }
 
-/// Status for a produced markdown string (caller uses Error for fetch/convert throws).
+/// Status for a produced markdown string. Conversion failures are swallowed to ""
+/// upstream (html_to_markdown never panics), so the only outcomes are done/empty.
 pub fn status_for(markdown: &str) -> MarkdownStatus {
     if markdown.trim().is_empty() { MarkdownStatus::Empty } else { MarkdownStatus::Done }
 }

@@ -29,6 +29,9 @@ struct RawDocument {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// FFI status codes returned by the C parser; Oom/Truncated cross the FFI
+// boundary so Rust can't see them constructed, but their ABI values must stay.
+#[allow(dead_code)]
 pub enum SgmlStatus {
     Ok = 0,
     Oom = 1,

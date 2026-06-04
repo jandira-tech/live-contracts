@@ -69,7 +69,7 @@ where
 {
     let selected: Vec<(String, Vec<u8>)> = graphics
         .into_iter()
-        .filter(|(f, _)| only.map_or(true, |o| o.contains(f)))
+        .filter(|(f, _)| only.is_none_or(|o| o.contains(f)))
         .collect();
     if selected.is_empty() {
         return Vec::new();
