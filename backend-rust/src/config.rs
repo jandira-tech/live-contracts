@@ -8,6 +8,9 @@ pub struct Config {
     pub hf_token: Option<String>,
     pub image_repo: String,
     pub poll_interval_ms: u64,
+    /// Max SEC document fetches per second (SEC caps clients at 10/s). Default 8
+    /// leaves margin; the pipeline throttles fetch_sgml to this rate.
+    pub max_rps: u64,
     pub push_batch: usize,
     pub port: u16,
     pub convert_markdown: bool,
@@ -65,6 +68,10 @@ impl Config {
             poll_interval_ms: get("SEC_POLL_INTERVAL_MS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(200),
+            max_rps: get("SEC_MAX_RPS")
+                .and_then(|v| v.parse().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(8),
             push_batch,
             port: get("PORT")
                 .and_then(|v| v.parse().ok())
@@ -93,6 +100,7 @@ mod tests {
         assert_eq!(cfg.ingest_url, "https://live-contracts.arthur.law/api/ingest");
         assert_eq!(cfg.image_repo, "arthrod/sec-ex10-exhibits");
         assert_eq!(cfg.poll_interval_ms, 200);
+        assert_eq!(cfg.max_rps, 8); // SEC-courtesy default, under the 10/s cap
         assert_eq!(cfg.push_batch, 100);
         assert_eq!(cfg.port, 7860);
         assert!(cfg.convert_markdown);
@@ -135,6 +143,7 @@ mod tests {
         assert_eq!(cfg.ingest_url, "https://example.com/api/ingest"); // D1_INGEST_URL, not SEC_INGEST_URL
         assert_eq!(cfg.push_batch, 200); // capped at 200
         assert_eq!(cfg.port, 9090);
+        assert_eq!(cfg.max_rps, 8); // 0/invalid ignored → default
         assert!(!cfg.convert_markdown);
         assert_eq!(cfg.hf_token.as_deref(), Some("hf_x"));
         // Either source can be disabled via env ("false"/"0"); build() still
