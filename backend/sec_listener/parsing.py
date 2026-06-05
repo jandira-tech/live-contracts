@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 import xml.etree.ElementTree as ET
 
@@ -52,13 +53,18 @@ def parse_summary_size_bytes(summary: str) -> int | None:
         value = float(m.group(1))
     except (TypeError, ValueError):
         return None
+    # Reject NaN and ±inf (e.g. an absurdly long digit run overflows float to inf):
+    # round() on a non-finite raises OverflowError/ValueError, so guard up front.
+    if not math.isfinite(value) or value < 0:
+        return None
     unit = (m.group(2) or "B").upper()
     multiplier = _SIZE_UNITS.get(unit)
     if multiplier is None:
         return None
-    if value < 0:
+    try:
+        return round(value * multiplier)
+    except (OverflowError, ValueError):
         return None
-    return round(value * multiplier)
 
 
 def parse_rss_feed(rss_content: str) -> list[dict]:
