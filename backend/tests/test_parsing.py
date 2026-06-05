@@ -71,6 +71,31 @@ def test_parse_summary_size_bytes(summary, expected):
     assert parse_summary_size_bytes(summary) == expected
 
 
+@pytest.mark.parametrize(
+    "summary, expected",
+    [
+        # Fractional values are floored to whole bytes.
+        ("<b>Size:</b> 1.5 MB", int(1.5 * 1024 * 1024)),
+        ("<b>Size:</b> 0.5 KB", int(0.5 * 1024)),
+        # Mixed / lowercase units must be matched case-insensitively.
+        ("<b>Size:</b> 10 kb", 10 * 1024),
+        ("<b>Size:</b> 3 Mb", 3 * 1024 * 1024),
+        ("<b>Size:</b> 1 gB", 1 * 1024 * 1024 * 1024),
+        # Unknown units -> None.
+        ("<b>Size:</b> 5 TB", None),
+        ("<b>Size:</b> 5 XX", None),
+        # Negative magnitude -> None.
+        ("<b>Size:</b> -10 KB", None),
+        # Malformed numeric token -> None.
+        ("<b>Size:</b> not-a-number KB", None),
+        # Non-finite (huge value overflows float to inf) must not raise -> None.
+        ("<b>Size:</b> " + "9" * 400 + " GB", None),
+    ],
+)
+def test_parse_summary_size_bytes_edge_cases(summary, expected):
+    assert parse_summary_size_bytes(summary) == expected
+
+
 def test_parse_rss_feed_carries_size_bytes():
     feed = (
         '<feed xmlns="http://www.w3.org/2005/Atom">'

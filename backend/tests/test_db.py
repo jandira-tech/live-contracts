@@ -43,6 +43,33 @@ def test_save_ex10_persists_source_size_bytes_detected_at(db):
     assert row["detected_at"] == "2026-06-06T12:00:00+00:00"
 
 
+def test_save_ex10_found_at_defaults_to_current_timestamp(db):
+    """Without an explicit found_at, the COALESCE(?, CURRENT_TIMESTAMP) fallback must
+    persist a non-NULL UTC timestamp in SQLite's canonical 'YYYY-MM-DD HH:MM:SS' form."""
+    import re
+    from datetime import datetime, timezone, timedelta
+
+    before = datetime.now(timezone.utc)
+    db.save_ex10_exhibit(
+        {"accession": "fa-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "fa.htm", "description": "", "sequence": "1", "url": "u"},
+        markdown="body",  # no found_at supplied
+    )
+    after = datetime.now(timezone.utc)
+
+    with db.connect() as conn:
+        found_at = conn.execute(
+            "SELECT found_at FROM ex10_exhibits WHERE accession='fa-1'"
+        ).fetchone()["found_at"]
+
+    assert found_at is not None
+    # Canonical CURRENT_TIMESTAMP format (UTC), no fractional seconds / tz suffix.
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", found_at), found_at
+    stored = datetime.strptime(found_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    # Within the call window (1s second-truncation slack on each side).
+    assert before - timedelta(seconds=1) <= stored <= after + timedelta(seconds=1)
+
+
 def test_save_and_read_filing_metadata(db):
     meta = {"company_name": "Lamb Weston Holdings, Inc.", "period": "20260519",
             "items": ["Entry into a Material Definitive Agreement"]}
