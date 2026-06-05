@@ -103,6 +103,19 @@ it('enrich-only: a re-push without source/size_bytes/detected_at does NOT wipe s
   expect(row.sizeBytes).toBe(999);                   // preserved
   expect(row.detectedAt).toBe('2026-05-03T01:02:03.000Z'); // preserved
 });
+it('accepts a batch of 6 distinct rows (exceeds D1 100-param cap at chunk=6, 18 cols)', async () => {
+  const rows = Array.from({ length: 6 }, (_, i) => ({
+    ...ROW, id: 100 + i, accession: `batch-${i}`, filename: `b${i}.htm`,
+  }));
+  const res = await POST(ctx({ rows }, 'secret'));
+  expect(res.status).toBe(200);
+  expect(((await res.json()) as { accepted: unknown[] }).accepted).toHaveLength(6);
+  const db = testDb();
+  for (let i = 0; i < 6; i++) {
+    const row = (await db.select().from(exhibits).where(eq(exhibits.accession, `batch-${i}`)))[0];
+    expect(row).toBeDefined();
+  }
+});
 it('round-trip: an ingested row is visible via the read layer', async () => {
   await POST(ctx({ rows: [ROW] }, 'secret'));
   const { listEx10 } = await import('../src/lib/api');
