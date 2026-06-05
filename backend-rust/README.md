@@ -19,9 +19,9 @@ and POSTs structured records to the Astro frontend's `/api/ingest` endpoint.
 | Variable | Default | Description |
 |---|---|---|
 | `SEC_API_KEY` | (required) | API key for the ingest endpoint |
-| `SEC_INGEST_URL` | `https://live-contracts.arthur.law/api/ingest` | Ingest POST target |
+| `D1_INGEST_URL` | `https://live-contracts.arthur.law/api/ingest` | Ingest POST target |
 | `SEC_POLL_INTERVAL_MS` | `200` | Monitor polling interval |
-| `SEC_CONCURRENCY` | `8` | Max concurrent submission processing |
+| `SEC_CONCURRENCY` | `8` | Max submissions processed concurrently per batch (floored to 1) |
 | `SEC_PUSH_BATCH` | `100` (max 200) | Rows per ingest POST |
 | `SEC_CONVERT_MARKDOWN` | `true` | Set `false` to skip HTML→MD |
 | `SEC_IMAGE_REPO` | `arthrod/sec-ex10-exhibits` | HF dataset for exhibit images |
@@ -32,3 +32,9 @@ and POSTs structured records to the Astro frontend's `/api/ingest` endpoint.
 ## Health
 
 `GET /health` returns `{"status":"ok","total_seen":N}`.
+
+## Ingest records
+
+Each POSTed record now also carries `source` (`"rss"`/`"efts"`), `size_bytes`
+(omitted when unknown), and `detected_at` (precise RFC3339 UTC). `found_at` is the
+display form `YYYY-MM-DD HH:MM:SS` (UTC) used for the frontend's string comparison.

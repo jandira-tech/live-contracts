@@ -98,4 +98,18 @@ mod tests {
         assert_eq!(g.graphics[0].0, "img1.jpg");
         assert!(!g.graphics[0].1.is_empty());
     }
+
+    #[test]
+    fn filing_url_uses_modern_path() {
+        // Regression guard: the stored filing_url must be the MODERN form
+        // .../data/{cik}/{accession_nodash}/{accession-dashed}.txt — the no-dash
+        // accession folder AND the dashed .txt filename.
+        let accession: u64 = 125_000_001; // arbitrary
+        let cik: u64 = 123;
+        let url = filing_url(accession, cik);
+        let nodash = secinfra::format_accession_int(accession, "nodash");
+        let dashed = secinfra::format_accession_int(accession, "dash");
+        assert!(url.contains(&format!("/data/{cik}/{nodash}/")), "missing nodash folder: {url}");
+        assert!(url.ends_with(&format!("/{dashed}.txt")), "missing dashed .txt: {url}");
+    }
 }

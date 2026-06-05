@@ -6,6 +6,28 @@ use crate::ingest::{resolve_filed_at, IngestRecord};
 use crate::markdown::{html_to_markdown, status_for};
 use secinfra::{ParsedSgml, ParsedSubmissionMetadata, Submission};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Map a discovery source to its canonical lowercase wire string.
+pub fn source_str(source: secinfra::SubmissionSource) -> &'static str {
+    match source {
+        secinfra::SubmissionSource::Rss => "rss",
+        secinfra::SubmissionSource::Efts => "efts",
+    }
+}
+
+/// Fields shared by every record in one filing.
+pub struct RecordMeta<'a> {
+    pub accession: &'a str,
+    pub cik: &'a str,
+    pub form_type: &'a str,
+    pub filing_url: &'a str,
+    pub found_at: &'a str,
+    pub detected_at: &'a str,
+    pub source: &'a str,
+    pub size_bytes: Option<u64>,
+    pub filing_metadata: Option<&'a str>,
+}
 
 /// A processed EX-10 document ready to become a record.
 pub struct DocResult {
@@ -15,38 +37,36 @@ pub struct DocResult {
     pub image_urls: Option<Vec<String>>,
 }
 
-/// Pure: assemble ingest records for one filing. `id_counter` is the
-/// monotonic per-process echo token, bumped once per record.
-#[allow(clippy::too_many_arguments)]
+/// Pure: assemble ingest records for one filing. `id_counter` is the shared
+/// per-process echo token, bumped once per record (D1 mints the real UUIDv7,
+/// so only per-process uniqueness matters — Relaxed ordering is sufficient).
 pub fn build_records(
-    id_counter: &mut u64,
-    accession: &str,
-    cik: &str,
-    form_type: &str,
-    filing_url: &str,
-    found_at: &str,
-    filing_metadata: Option<&str>,
+    id_counter: &AtomicU64,
+    meta: &RecordMeta<'_>,
     docs: Vec<DocResult>,
 ) -> Vec<IngestRecord> {
     docs.into_iter()
         .map(|d| {
-            *id_counter += 1;
+            let id = id_counter.fetch_add(1, Ordering::Relaxed) + 1;
             IngestRecord {
-                id: *id_counter,
-                accession: accession.to_string(),
-                cik: cik.to_string(),
-                form_type: form_type.to_string(),
+                id,
+                accession: meta.accession.to_string(),
+                cik: meta.cik.to_string(),
+                form_type: meta.form_type.to_string(),
                 doc_type: d.doc.doc_type,
                 filename: d.doc.filename,
                 description: d.doc.description,
                 sequence: d.doc.sequence,
-                filing_url: filing_url.to_string(),
-                found_at: found_at.to_string(),
-                filed_at: resolve_filed_at("", filing_metadata),
+                filing_url: meta.filing_url.to_string(),
+                found_at: meta.found_at.to_string(),
+                filed_at: resolve_filed_at("", meta.filing_metadata),
                 markdown_status: d.status,
-                filing_metadata: filing_metadata.map(|s| s.to_string()),
+                filing_metadata: meta.filing_metadata.map(|s| s.to_string()),
                 image_urls: d.image_urls.map(|u| serde_json::to_string(&u).unwrap_or_else(|_| "[]".into())),
                 markdown: d.markdown,
+                source: meta.source.to_string(),
+                size_bytes: meta.size_bytes,
+                detected_at: meta.detected_at.to_string(),
             }
         })
         .collect()
@@ -56,7 +76,7 @@ pub fn build_records(
 pub async fn process_submission(
     client: &reqwest::Client,
     cfg: &Config,
-    id_counter: &mut u64,
+    id_counter: &AtomicU64,
     sub: &Submission,
 ) -> Vec<IngestRecord> {
     let cik = match sub.ciks.first() {
@@ -65,7 +85,11 @@ pub async fn process_submission(
     };
     let accession_str = secinfra::format_accession_int(sub.accession, "dash");
     let f_url = filing_url(sub.accession, cik);
-    let found_at = sub.detected_time.to_rfc3339();
+    // Display form for the D1 frontend's `found_at >= datetime('now',...)` string
+    // comparison/sort; the precise machine timestamp lives in `detected_at`.
+    let found_at = sub.detected_time.format("%Y-%m-%d %H:%M:%S").to_string();
+    let detected_at = sub.detected_time.to_rfc3339();
+    let source = source_str(sub.source);
 
     let sgml = match fetch_sgml(client, sub.accession, cik).await {
         Ok(b) => b,
@@ -137,12 +161,17 @@ pub async fn process_submission(
 
     build_records(
         id_counter,
-        &accession_str,
-        &cik.to_string(),
-        &sub.submission_type,
-        &f_url,
-        &found_at,
-        Some(&meta_json),
+        &RecordMeta {
+            accession: &accession_str,
+            cik: &cik.to_string(),
+            form_type: &sub.submission_type,
+            filing_url: &f_url,
+            found_at: &found_at,
+            detected_at: &detected_at,
+            source,
+            size_bytes: sub.size_bytes,
+            filing_metadata: Some(&meta_json),
+        },
         results,
     )
 }
@@ -173,10 +202,20 @@ mod tests {
                 image_urls: Some(vec!["https://hf/x.jpg".into()]),
             },
         ];
+        let counter = AtomicU64::new(0);
         let recs = build_records(
-            &mut 0, "0001-25-000001", "123", "8-K",
-            "https://sec.gov/f.txt", "2025-02-01T00:00:00Z",
-            Some("{\"filed_at\":\"20250201080000\"}"),
+            &counter,
+            &RecordMeta {
+                accession: "0001-25-000001",
+                cik: "123",
+                form_type: "8-K",
+                filing_url: "https://sec.gov/f.txt",
+                found_at: "2025-02-01 08:00:00",
+                detected_at: "2025-02-01T08:00:00.123456+00:00",
+                source: "efts",
+                size_bytes: Some(4096),
+                filing_metadata: Some("{\"filed_at\":\"20250201080000\"}"),
+            },
             inputs,
         );
         assert_eq!(recs.len(), 2);
@@ -188,5 +227,17 @@ mod tests {
         assert_eq!(recs[0].image_urls, None);
         assert_eq!(recs[1].markdown_status, "empty");
         assert_eq!(recs[1].image_urls, Some("[\"https://hf/x.jpg\"]".into()));
+        // New fields: display found_at, precise detected_at, source, size_bytes.
+        assert_eq!(recs[0].found_at, "2025-02-01 08:00:00");
+        assert_eq!(recs[0].detected_at, "2025-02-01T08:00:00.123456+00:00");
+        assert_eq!(recs[0].source, "efts");
+        assert_eq!(recs[0].size_bytes, Some(4096));
+        assert_eq!(recs[1].size_bytes, Some(4096));
+    }
+
+    #[test]
+    fn source_str_maps_to_lowercase() {
+        assert_eq!(source_str(secinfra::SubmissionSource::Rss), "rss");
+        assert_eq!(source_str(secinfra::SubmissionSource::Efts), "efts");
     }
 }

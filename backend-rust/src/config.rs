@@ -9,6 +9,8 @@ pub struct Config {
     pub image_repo: String,
     pub poll_interval_ms: u64,
     pub push_batch: usize,
+    /// Max submissions processed concurrently per monitor batch. Floored to 1.
+    pub concurrency: usize,
     pub port: u16,
     pub convert_markdown: bool,
     /// Discovery sources. Mirrors datamule's Monitor, which combines the speed of
@@ -46,6 +48,10 @@ impl Config {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(100)
             .min(200);
+        let concurrency = get("SEC_CONCURRENCY")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(8)
+            .max(1);
         // One place for boolean-like env parsing ("false"/"0" → false, default true).
         let flag = |key: &str| get(key).map(|v| v != "false" && v != "0").unwrap_or(true);
         let convert_markdown = flag("SEC_CONVERT_MARKDOWN");
@@ -62,6 +68,7 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(200),
             push_batch,
+            concurrency,
             port: get("PORT")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(7860),
@@ -89,6 +96,7 @@ mod tests {
         assert_eq!(cfg.image_repo, "arthrod/sec-ex10-exhibits");
         assert_eq!(cfg.poll_interval_ms, 200);
         assert_eq!(cfg.push_batch, 100);
+        assert_eq!(cfg.concurrency, 8);
         assert_eq!(cfg.port, 7860);
         assert!(cfg.convert_markdown);
         assert!(cfg.hf_token.is_none());
@@ -120,6 +128,23 @@ mod tests {
         // requires at least one to be true (enforced by secinfra::Monitor).
         assert!(!cfg.use_rss);
         assert!(!cfg.use_efts);
+    }
+
+    #[test]
+    fn concurrency_overrides_and_floors_to_one() {
+        let over = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "32")]);
+        let cfg = Config::from_map(|k| over.get(k).cloned());
+        assert_eq!(cfg.concurrency, 32);
+
+        // "0" must floor to 1 — buffer_unordered(0) would stall the stream.
+        let zero = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "0")]);
+        let cfg = Config::from_map(|k| zero.get(k).cloned());
+        assert_eq!(cfg.concurrency, 1);
+
+        // Garbage → default 8.
+        let bad = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "abc")]);
+        let cfg = Config::from_map(|k| bad.get(k).cloned());
+        assert_eq!(cfg.concurrency, 8);
     }
 
     #[test]

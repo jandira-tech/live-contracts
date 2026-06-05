@@ -20,6 +20,13 @@ pub struct IngestRecord {
     pub filing_metadata: Option<String>,
     pub image_urls: Option<String>, // null when none; serialized explicitly
     pub markdown: String,
+    /// Discovery source: "rss" or "efts".
+    pub source: String,
+    /// Raw filing size in bytes, when the monitor reported it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    /// Precise canonical detection timestamp (RFC3339 UTC).
+    pub detected_at: String,
 }
 
 /// filed_at fallback: use the direct value; if empty, read filing_metadata.filed_at.
@@ -105,15 +112,27 @@ mod tests {
             filing_metadata: Some("{\"filed_at\":\"20250201080000\"}".into()),
             image_urls: None,
             markdown: "# hi".into(),
+            source: "rss".into(),
+            size_bytes: None,
+            detected_at: "2025-02-01T08:00:00+00:00".into(),
         };
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         for k in ["id","accession","cik","form_type","doc_type","filename","description",
                   "sequence","filing_url","found_at","filed_at","markdown_status",
-                  "filing_metadata","image_urls","markdown"] {
+                  "filing_metadata","image_urls","markdown","source","detected_at"] {
             assert!(v.get(k).is_some(), "missing {k}");
         }
         assert_eq!(v["id"], serde_json::json!(1));
         assert_eq!(v["image_urls"], serde_json::Value::Null);
+        assert_eq!(v["source"], serde_json::json!("rss"));
+        assert_eq!(v["detected_at"], serde_json::json!("2025-02-01T08:00:00+00:00"));
+        // size_bytes: None must be omitted entirely.
+        assert!(v.get("size_bytes").is_none(), "size_bytes None should be omitted");
+
+        // size_bytes: Some(N) must serialize.
+        let r2 = IngestRecord { size_bytes: Some(4096), ..r };
+        let v2: serde_json::Value = serde_json::to_value(&r2).unwrap();
+        assert_eq!(v2["size_bytes"], serde_json::json!(4096));
     }
 
     #[test]

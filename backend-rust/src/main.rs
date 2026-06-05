@@ -29,7 +29,9 @@ async fn run(cfg: Config, state: HealthState) {
         .use_efts(cfg.use_efts)
         .build();
 
-    let mut id_counter: u64 = 0u64;
+    // Shared echo-token counter (D1 mints the real UUIDv7, so we only need
+    // per-process uniqueness — safe to share across concurrent tasks).
+    let id_counter = Arc::new(AtomicU64::new(0));
     use futures::StreamExt;
     let mut stream = std::pin::pin!(monitor);
 
@@ -42,25 +44,39 @@ async fn run(cfg: Config, state: HealthState) {
             }
         };
 
-        for sub in batch {
-            let accession = sub.accession;
-            let form = sub.submission_type.clone();
-            tracing::debug!("processing {accession} ({form})");
+        // Process the batch concurrently (bounded by cfg.concurrency). Each task
+        // POSTs its own records; order across submissions may interleave.
+        futures::stream::iter(batch)
+            .map(|sub| {
+                let client = &client;
+                let cfg = &cfg;
+                let state = &state;
+                let id_counter = &id_counter;
+                async move {
+                    let accession = sub.accession;
+                    let form = sub.submission_type.clone();
+                    tracing::debug!("processing {accession} ({form})");
 
-            let records = pipeline::process_submission(&client, &cfg, &mut id_counter, &sub).await;
-            if records.is_empty() {
-                continue;
-            }
+                    let records =
+                        pipeline::process_submission(client, cfg, id_counter, &sub).await;
+                    if records.is_empty() {
+                        return;
+                    }
 
-            state.total_seen.fetch_add(1, Ordering::Relaxed);
+                    state.total_seen.fetch_add(1, Ordering::Relaxed);
 
-            // POST in chunks
-            let chunks = ingest::chunk_rows(&records, cfg.push_batch);
-            for chunk in chunks {
-                let n = ingest::post_batch(&client, &cfg.ingest_url, &cfg.api_key, chunk).await;
-                tracing::info!("ingested {n} records for {accession}");
-            }
-        }
+                    // POST in chunks.
+                    let chunks = ingest::chunk_rows(&records, cfg.push_batch);
+                    for chunk in chunks {
+                        let n =
+                            ingest::post_batch(client, &cfg.ingest_url, &cfg.api_key, chunk).await;
+                        tracing::info!("ingested {n} records for {accession}");
+                    }
+                }
+            })
+            .buffer_unordered(cfg.concurrency)
+            .for_each(|()| async {})
+            .await;
     }
 }
 
