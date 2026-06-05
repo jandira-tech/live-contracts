@@ -48,17 +48,21 @@ async fn run(cfg: Config, state: HealthState) {
         // POSTs its own records; order across submissions may interleave.
         futures::stream::iter(batch)
             .map(|sub| {
-                let client = &client;
-                let cfg = &cfg;
-                let state = &state;
-                let id_counter = &id_counter;
+                // Clone the cheap handles into the future so each one is `'static`
+                // (reqwest::Client is an Arc internally; Config/HealthState/the
+                // counter are Arc/cheap). This is what lets process_submission use
+                // spawn_blocking without borrowing the surrounding scope.
+                let client = client.clone();
+                let cfg = cfg.clone();
+                let state = state.clone();
+                let id_counter = id_counter.clone();
                 async move {
                     let accession = sub.accession;
                     let form = sub.submission_type.clone();
                     tracing::debug!("processing {accession} ({form})");
 
                     let records =
-                        pipeline::process_submission(client, cfg, id_counter, &sub).await;
+                        pipeline::process_submission(&client, &cfg, &id_counter, &sub).await;
                     if records.is_empty() {
                         return;
                     }
@@ -69,7 +73,7 @@ async fn run(cfg: Config, state: HealthState) {
                     let chunks = ingest::chunk_rows(&records, cfg.push_batch);
                     for chunk in chunks {
                         let n =
-                            ingest::post_batch(client, &cfg.ingest_url, &cfg.api_key, chunk).await;
+                            ingest::post_batch(&client, &cfg.ingest_url, &cfg.api_key, chunk).await;
                         tracing::info!("ingested {n} records for {accession}");
                     }
                 }

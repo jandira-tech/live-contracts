@@ -72,6 +72,60 @@ pub fn build_records(
         .collect()
 }
 
+/// One EX-10 doc after the CPU-bound markdown conversion (owned, `'static`).
+struct ParsedDoc {
+    doc: Ex10Doc,
+    markdown: String,
+    status: String,
+}
+
+/// Fully owned output of the CPU-bound parse/convert section, safe to return
+/// across the `spawn_blocking` await boundary.
+struct ParsedSubmission {
+    docs: Vec<ParsedDoc>,
+    graphics: Vec<(String, Vec<u8>)>,
+    meta_json: String,
+}
+
+/// CPU-bound: parse SGML, gather EX-10 + graphics, convert each EX-10 to
+/// markdown, and build the header meta JSON. Returns `None` when there is
+/// nothing to emit (parse error or no EX-10 docs). Runs inside `spawn_blocking`
+/// so it never blocks the async runtime.
+fn parse_submission_blocking(
+    sgml: &[u8],
+    convert_markdown: bool,
+    accession_str: &str,
+) -> Option<ParsedSubmission> {
+    let parsed = match ParsedSgml::parse(sgml) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("SGML parse failed for {accession_str}: {e}");
+            return None;
+        }
+    };
+    let gathered = gather(&parsed);
+    if gathered.ex10.is_empty() {
+        return None;
+    }
+    let meta_json = match ParsedSubmissionMetadata::parse(sgml) {
+        Ok(m) => header_json(&header_events(&m)),
+        Err(_) => header_json(&[]),
+    };
+
+    let docs = gathered
+        .ex10
+        .into_iter()
+        .map(|doc| {
+            let html = String::from_utf8_lossy(&doc.content);
+            let markdown = if convert_markdown { html_to_markdown(&html) } else { String::new() };
+            let status = status_for(&markdown).as_str().to_string();
+            ParsedDoc { doc, markdown, status }
+        })
+        .collect();
+
+    Some(ParsedSubmission { docs, graphics: gathered.graphics, meta_json })
+}
+
 /// Process one submission end-to-end into ingest records. Never panics.
 pub async fn process_submission(
     client: &reqwest::Client,
@@ -99,31 +153,30 @@ pub async fn process_submission(
         }
     };
 
-    // Scope parsed SGML so the borrow is dropped before any .await.
-    let (gathered, meta_json) = {
-        let parsed = match ParsedSgml::parse(&sgml) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("SGML parse failed for {accession_str}: {e}");
-                return Vec::new();
-            }
-        };
-        let g = gather(&parsed);
-        if g.ex10.is_empty() {
+    // The CPU-bound section (SGML parse, gather, HTML→markdown) blocks the Tokio
+    // worker thread driving the `buffer_unordered` stream; offload it to a blocking
+    // thread so it can't stall the async runtime (e.g. the health server). The
+    // closure takes ownership of the fetched bytes + needed cfg flags and returns
+    // fully owned data — no borrows survive the await boundary.
+    let convert_markdown = cfg.convert_markdown;
+    let accession_for_blocking = accession_str.clone();
+    let parsed = tokio::task::spawn_blocking(move || {
+        parse_submission_blocking(&sgml, convert_markdown, &accession_for_blocking)
+    })
+    .await;
+    let ParsedSubmission { docs, graphics, meta_json } = match parsed {
+        Ok(Some(p)) => p,
+        Ok(None) => return Vec::new(),
+        Err(e) => {
+            tracing::warn!("parse task failed for {accession_str}: {e}");
             return Vec::new();
         }
-        let meta = match ParsedSubmissionMetadata::parse(&sgml) {
-            Ok(m) => header_json(&header_events(&m)),
-            Err(_) => header_json(&[]),
-        };
-        (g, meta)
     };
 
+    // Image capture is async (network) — run it here on the owned parse output.
     let mut results = Vec::new();
-    for doc in gathered.ex10 {
-        let html = String::from_utf8_lossy(&doc.content);
-        let md = if cfg.convert_markdown { html_to_markdown(&html) } else { String::new() };
-        let status = status_for(&md).as_str().to_string();
+    for parsed_doc in docs {
+        let ParsedDoc { doc, markdown: md, status } = parsed_doc;
 
         // image-only → capture this doc's images (best-effort).
         let mut image_urls: Option<Vec<String>> = None;
@@ -135,7 +188,7 @@ pub async fn process_submission(
             let repo_for_closure = repo.clone();
             let urls = capture_images_with(
                 &accession_str,
-                gathered.graphics.clone(),
+                graphics.clone(),
                 Some(&only_refs),
                 &repo,
                 move |uploads| {
