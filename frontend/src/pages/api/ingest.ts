@@ -45,7 +45,10 @@ const toInsert = (r: InRow): ExhibitInsert => ({
   sequence: r.sequence ?? null, filingUrl: r.filing_url ?? null, foundAt: r.found_at ?? null,
   filedAt: r.filed_at ?? null, markdownStatus: r.markdown_status ?? null,
   filingMetadata: r.filing_metadata ?? null, imageUrls: r.image_urls ?? null, markdown: r.markdown ?? null,
-  source: r.source ?? null, sizeBytes: r.size_bytes ?? null, detectedAt: r.detected_at ?? null,
+  // Normalize blank/whitespace strings to null so they don't bypass the enrich-only
+  // coalesce and clobber a stored value with an empty string.
+  source: (r.source && r.source.trim()) || null, sizeBytes: r.size_bytes ?? null,
+  detectedAt: (r.detected_at && r.detected_at.trim()) || null,
 });
 
 // On (accession, doc_type, filename) conflict, refresh everything except the conflict key.

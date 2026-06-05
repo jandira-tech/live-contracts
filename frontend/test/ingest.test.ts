@@ -93,15 +93,23 @@ it('persists source, size_bytes, detected_at', async () => {
   expect(row.sizeBytes).toBe(12345);
   expect(row.detectedAt).toBe('2026-05-03T00:00:00.123Z');
 });
-it('enrich-only: a re-push without source/size_bytes/detected_at does NOT wipe stored values', async () => {
+it('enrich-only: a re-push with blank/NULL source/size_bytes/detected_at does NOT wipe stored values', async () => {
   await POST(ctx({ rows: [{ ...ROW, source: 'rss', size_bytes: 999, detected_at: '2026-05-03T01:02:03.000Z' }] }, 'secret'));
-  // Re-push the SAME key with these fields absent/NULL.
-  await POST(ctx({ rows: [{ ...ROW, source: null, size_bytes: null, detected_at: null }] }, 'secret'));
+  // Re-push the SAME key with blank/NULL fields: blank strings normalize to null → coalesce keeps stored.
+  await POST(ctx({ rows: [{ ...ROW, source: ' ', size_bytes: null, detected_at: '' }] }, 'secret'));
   const db = testDb();
   const row = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0];
   expect(row.source).toBe('rss');                    // preserved
   expect(row.sizeBytes).toBe(999);                   // preserved
   expect(row.detectedAt).toBe('2026-05-03T01:02:03.000Z'); // preserved
+});
+it('a real (non-NULL) source overwrites, while a NULL size_bytes leaves size_bytes intact', async () => {
+  await POST(ctx({ rows: [{ ...ROW, source: 'rss', size_bytes: 999 }] }, 'secret'));
+  await POST(ctx({ rows: [{ ...ROW, source: 'efts', size_bytes: null }] }, 'secret'));
+  const db = testDb();
+  const row = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0];
+  expect(row.source).toBe('efts');   // non-NULL incoming wins
+  expect(row.sizeBytes).toBe(999);   // NULL incoming → coalesce keeps stored
 });
 it('accepts a batch of 6 distinct rows (exceeds D1 100-param cap at chunk=6, 18 cols)', async () => {
   const rows = Array.from({ length: 6 }, (_, i) => ({
