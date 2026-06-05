@@ -15,6 +15,7 @@ interface InRow {
   filename: string; description?: string; sequence?: string; filing_url?: string;
   found_at?: string; filed_at?: string; markdown_status?: string;
   filing_metadata?: string; image_urls?: string; markdown?: string;
+  source?: string; size_bytes?: number; detected_at?: string;
 }
 
 // UUIDv7: 48-bit big-endian unix-ms timestamp + 74 random bits, version/variant set.
@@ -44,6 +45,7 @@ const toInsert = (r: InRow): ExhibitInsert => ({
   sequence: r.sequence ?? null, filingUrl: r.filing_url ?? null, foundAt: r.found_at ?? null,
   filedAt: r.filed_at ?? null, markdownStatus: r.markdown_status ?? null,
   filingMetadata: r.filing_metadata ?? null, imageUrls: r.image_urls ?? null, markdown: r.markdown ?? null,
+  source: r.source ?? null, sizeBytes: r.size_bytes ?? null, detectedAt: r.detected_at ?? null,
 });
 
 // On (accession, doc_type, filename) conflict, refresh everything except the conflict key.
@@ -60,6 +62,9 @@ const CONFLICT_SET = {
   filingMetadata: sql`coalesce(excluded.filing_metadata, filing_metadata)`,
   imageUrls: sql`coalesce(excluded.image_urls, image_urls)`,
   markdown: sql`coalesce(excluded.markdown, markdown)`,
+  source: sql`coalesce(excluded.source, source)`,
+  sizeBytes: sql`coalesce(excluded.size_bytes, size_bytes)`,
+  detectedAt: sql`coalesce(excluded.detected_at, detected_at)`,
 };
 
 const j = (o: unknown, status: number) =>

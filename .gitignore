@@ -41,3 +41,6 @@ deploy/hf-space/seed.db
 
 # Local data snapshots (parquet mirror / exports)
 *.parquet
+
+# Unrelated embedded clone (not part of this repo)
+secinfra-rust/

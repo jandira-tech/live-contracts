@@ -85,6 +85,24 @@ it('re-push of the same row keeps its assigned id (stable across pushes)', async
   const after = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0].id;
   expect(after).toBe(before);                   // id assigned once, kept on conflict-update
 });
+it('persists source, size_bytes, detected_at', async () => {
+  await POST(ctx({ rows: [{ ...ROW, source: 'efts', size_bytes: 12345, detected_at: '2026-05-03T00:00:00.123Z' }] }, 'secret'));
+  const db = testDb();
+  const row = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0];
+  expect(row.source).toBe('efts');
+  expect(row.sizeBytes).toBe(12345);
+  expect(row.detectedAt).toBe('2026-05-03T00:00:00.123Z');
+});
+it('enrich-only: a re-push without source/size_bytes/detected_at does NOT wipe stored values', async () => {
+  await POST(ctx({ rows: [{ ...ROW, source: 'rss', size_bytes: 999, detected_at: '2026-05-03T01:02:03.000Z' }] }, 'secret'));
+  // Re-push the SAME key with these fields absent/NULL.
+  await POST(ctx({ rows: [{ ...ROW, source: null, size_bytes: null, detected_at: null }] }, 'secret'));
+  const db = testDb();
+  const row = (await db.select().from(exhibits).where(eq(exhibits.accession, 'acc-5')))[0];
+  expect(row.source).toBe('rss');                    // preserved
+  expect(row.sizeBytes).toBe(999);                   // preserved
+  expect(row.detectedAt).toBe('2026-05-03T01:02:03.000Z'); // preserved
+});
 it('round-trip: an ingested row is visible via the read layer', async () => {
   await POST(ctx({ rows: [ROW] }, 'secret'));
   const { listEx10 } = await import('../src/lib/api');
