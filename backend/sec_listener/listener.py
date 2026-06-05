@@ -18,7 +18,7 @@ import asyncio
 import logging
 import signal
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import aiohttp
 
@@ -26,7 +26,12 @@ from .config import Config
 from .converter import convert_html_to_markdown
 from .db import Database
 from .net import retry_async
-from .parsing import classify_documents, extract_filing_header, parse_rss_feed
+from .parsing import (
+    classify_documents,
+    extract_filing_header,
+    filing_txt_url,
+    parse_rss_feed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +80,16 @@ class Listener:
             logger.warning("extraction failed for %s: %s", accession, exc)
             return 0, 0
 
+        # The detection instant: found_at is the display form (YYYY-MM-DD HH:MM:SS,
+        # UTC) the D1 frontend string-sorts/compares; detected_at is the precise
+        # RFC3339 UTC machine timestamp for the same instant. source is the
+        # discovery channel — always the SEC RSS getcurrent feed here.
+        now = datetime.now(timezone.utc)
+        found_at = now.strftime("%Y-%m-%d %H:%M:%S")
+        detected_at = now.isoformat()
+        source = "rss"
+        size_bytes = filing.get("size_bytes")
+
         for doc in ex10_docs:
             markdown = ""
             content = doc.get("content")
@@ -94,6 +109,10 @@ class Listener:
                     "description": doc.get("description", ""),
                     "sequence": doc.get("sequence", ""),
                     "url": filing_url,
+                    "found_at": found_at,
+                    "detected_at": detected_at,
+                    "source": source,
+                    "size_bytes": size_bytes,
                 },
                 markdown=markdown or None,
                 filing_metadata=filing_metadata or None,
@@ -121,7 +140,7 @@ class Listener:
         from datamule import Submission, format_accession
 
         formatted = format_accession(accession.replace("-", ""), "dash")
-        url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{formatted}.txt"
+        url = filing_txt_url(cik, formatted)
         sub = Submission(url=url)
         filing_metadata = extract_filing_header(sub.metadata.content)
         md_docs = sub.metadata.content.get("documents", [])

@@ -20,6 +20,29 @@ def test_init_creates_ex10_table_with_markdown_column(db):
     assert "filing_metadata" in cols
 
 
+def test_init_creates_new_parity_columns(db):
+    cols = db.column_names("ex10_exhibits")
+    assert "source" in cols
+    assert "size_bytes" in cols
+    assert "detected_at" in cols
+
+
+def test_save_ex10_persists_source_size_bytes_detected_at(db):
+    db.save_ex10_exhibit(
+        {"accession": "p-1", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "p.htm", "description": "", "sequence": "1", "url": "u",
+         "source": "rss", "size_bytes": 4096, "detected_at": "2026-06-06T12:00:00+00:00"},
+        markdown="body", filing_metadata={"filed_at": "20260501120000"},
+    )
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT source, size_bytes, detected_at FROM ex10_exhibits WHERE accession='p-1'"
+        ).fetchone()
+    assert row["source"] == "rss"
+    assert row["size_bytes"] == 4096
+    assert row["detected_at"] == "2026-06-06T12:00:00+00:00"
+
+
 def test_save_and_read_filing_metadata(db):
     meta = {"company_name": "Lamb Weston Holdings, Inc.", "period": "20260519",
             "items": ["Entry into a Material Definitive Agreement"]}
