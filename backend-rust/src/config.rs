@@ -9,7 +9,8 @@ pub struct Config {
     pub image_repo: String,
     pub poll_interval_ms: u64,
     pub push_batch: usize,
-    /// Max submissions processed concurrently per monitor batch. Floored to 1.
+    /// Max submissions processed concurrently per monitor batch. Floored to 1,
+    /// capped at 50 (SEC rate-limit / resource-exhaustion guard).
     pub concurrency: usize,
     pub port: u16,
     pub convert_markdown: bool,
@@ -48,10 +49,12 @@ impl Config {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(100)
             .min(200);
+        // Floor 1 (buffer_unordered(0) stalls), cap 50 (rate-limit / resource
+        // guard). clamp(1, 50) == .max(1).min(50); clippy prefers clamp.
         let concurrency = get("SEC_CONCURRENCY")
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(8)
-            .max(1);
+            .clamp(1, 50);
         // One place for boolean-like env parsing ("false"/"0" → false, default true).
         let flag = |key: &str| get(key).map(|v| v != "false" && v != "0").unwrap_or(true);
         let convert_markdown = flag("SEC_CONVERT_MARKDOWN");
@@ -145,6 +148,14 @@ mod tests {
         let bad = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "abc")]);
         let cfg = Config::from_map(|k| bad.get(k).cloned());
         assert_eq!(cfg.concurrency, 8);
+    }
+
+    #[test]
+    fn concurrency_is_capped_at_50() {
+        // Cap to avoid SEC rate-limit / resource exhaustion under huge env values.
+        let huge = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "100")]);
+        let cfg = Config::from_map(|k| huge.get(k).cloned());
+        assert_eq!(cfg.concurrency, 50);
     }
 
     #[test]
