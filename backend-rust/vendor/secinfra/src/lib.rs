@@ -1,5 +1,6 @@
 mod common;
 mod compression_util;
+mod construct_submissions_metadata;
 mod construct_urls;
 mod efts;
 mod filing_archive;
@@ -15,6 +16,10 @@ pub use compression_util::{
     CompressedByteStream, CompressedBytes, CompressedStreamStats, CompressionType, IoByteStream,
     compress_byte_stream_async, compress_byte_stream_to_stream, compress_bytes,
     compress_bytes_async,
+};
+pub use construct_submissions_metadata::{
+    ConstructSubmissionsMetadataStats, construct_submissions_metadata,
+    construct_submissions_metadata_from_zip,
 };
 pub use construct_urls::{
     construct_document_url, construct_folder_url, construct_index_url, construct_sgml_url,
