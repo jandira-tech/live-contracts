@@ -16,7 +16,14 @@ RUST_DB = ROOT / "rust_ex10.db"
 PY_DB = ROOT / "ex10_listener.db"
 
 
+# Table names can't be bound as SQL parameters, so guard against interpolating
+# anything but a known table identifier before formatting it into the query.
+_ALLOWED_TABLES = {"ex10_exhibits", "all_exhibits", "seen_accessions", "rss_entries"}
+
+
 def load(db, table):
+    if table not in _ALLOWED_TABLES:
+        raise ValueError(f"unknown table: {table!r}")
     if not db.exists():
         return {}
     con = sqlite3.connect(db)
@@ -24,7 +31,7 @@ def load(db, table):
     try:
         return {
             (r["accession"], r["doc_type"], r["filename"]): dict(r)
-            for r in con.execute(f"SELECT * FROM {table}")
+            for r in con.execute(f"SELECT * FROM {table}")  # noqa: S608 (allowlisted identifier)
         }
     finally:
         con.close()

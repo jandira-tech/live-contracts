@@ -47,6 +47,9 @@ mod args {
                     let n: usize = val
                         .parse()
                         .map_err(|_| anyhow::anyhow!("--threads must be a positive integer"))?;
+                    if n == 0 {
+                        bail!("--threads must be a positive integer");
+                    }
                     threads = Some(n);
                 }
                 flag if flag.starts_with('-') => {
@@ -74,7 +77,7 @@ mod args {
 Options:
   -o, --output <path>   Output Parquet file path (required)
   --from-zip <path>     Use a local submissions.zip instead of downloading from SEC
-  --threads <n>         Number of worker threads (default: 6)
+  --threads <n>         Number of worker threads (default: 1)
   -h, --help            Print this help and exit"
     }
 
@@ -95,6 +98,13 @@ Options:
                 msg.contains("--output"),
                 "error should mention --output, got: {msg}"
             );
+        }
+
+        #[test]
+        fn threads_zero_is_error() {
+            let result = parse_args(&argv(&["--output", "/tmp/o.parquet", "--threads", "0"]));
+            assert!(result.is_err(), "expected error for --threads 0");
+            assert!(result.unwrap_err().to_string().contains("positive integer"));
         }
 
         #[test]
@@ -279,13 +289,15 @@ async fn main() {
     let t0 = Instant::now();
 
     let result = if let Some(zip_path) = backfill_args.from_zip {
-        let output = backfill_args.output.clone();
+        let output = backfill_args.output;
         let threads = backfill_args.threads;
         tokio::task::spawn_blocking(move || {
             construct_submissions_metadata_from_zip(output, zip_path, None, threads)
         })
         .await
-        .expect("spawn_blocking panicked")
+        // A panic in the blocking worker becomes a clean error instead of
+        // aborting the process.
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("backfill worker panicked: {e}")))
     } else {
         construct_submissions_metadata(backfill_args.output, None, None, backfill_args.threads)
             .await
