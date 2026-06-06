@@ -11,10 +11,20 @@ pub struct Ex10Doc {
     pub content: Vec<u8>,
 }
 
-/// EX-10 exhibits + GRAPHIC (image) documents from one parsed filing.
+/// Metadata-only record of a non-EX-10 document (for the all_exhibits table).
+pub struct DocMeta {
+    pub doc_type: String,
+    pub filename: String,
+    pub description: String,
+    pub sequence: String,
+}
+
+/// EX-10 exhibits + GRAPHIC (image) documents from one parsed filing, plus the
+/// metadata of every non-EX-10 document (`others`) for all_exhibits parity.
 pub struct Gathered {
     pub ex10: Vec<Ex10Doc>,
     pub graphics: Vec<(String, Vec<u8>)>,
+    pub others: Vec<DocMeta>,
 }
 
 fn s(bytes: &[u8]) -> String {
@@ -25,6 +35,7 @@ fn s(bytes: &[u8]) -> String {
 pub fn gather(parsed: &ParsedSgml) -> Gathered {
     let mut ex10 = Vec::new();
     let mut graphics = Vec::new();
+    let mut others = Vec::new();
     for d in parsed.documents() {
         let dt = s(d.doc_type());
         if is_traditional_ex10(&dt) {
@@ -35,14 +46,23 @@ pub fn gather(parsed: &ParsedSgml) -> Gathered {
                 sequence: s(d.sequence()),
                 content: d.content().to_vec(),
             });
-        } else if dt == "GRAPHIC" {
+            continue;
+        }
+        // Every non-EX-10 document → all_exhibits metadata (mirrors Python's split).
+        others.push(DocMeta {
+            doc_type: dt.clone(),
+            filename: s(d.filename()),
+            description: s(d.description()),
+            sequence: s(d.sequence()),
+        });
+        if dt == "GRAPHIC" {
             let fname = s(d.filename());
             if !fname.is_empty() {
                 graphics.push((fname, d.content().to_vec()));
             }
         }
     }
-    Gathered { ex10, graphics }
+    Gathered { ex10, graphics, others }
 }
 
 /// Bridge standardized submission metadata into header::Event list.
@@ -97,5 +117,9 @@ mod tests {
         assert_eq!(g.graphics.len(), 1);
         assert_eq!(g.graphics[0].0, "img1.jpg");
         assert!(!g.graphics[0].1.is_empty());
+        // every non-EX-10 document is also recorded (metadata only) for all_exhibits
+        assert_eq!(g.others.len(), 1);
+        assert_eq!(g.others[0].doc_type, "GRAPHIC");
+        assert_eq!(g.others[0].filename, "img1.jpg");
     }
 }

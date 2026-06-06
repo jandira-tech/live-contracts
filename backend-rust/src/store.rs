@@ -62,8 +62,7 @@ impl Store {
         self.conn.lock().unwrap().execute_batch(SCHEMA)
     }
 
-    // The write paths below are exercised by tests now and wired into the
-    // pipeline in the next PR (all-exhibit capture); allow until then.
+    // Used by the backfill loop (PR-3); exercised by tests now.
     #[allow(dead_code)]
     pub fn is_seen(&self, accession: &str) -> rusqlite::Result<bool> {
         let conn = self.conn.lock().unwrap();
@@ -75,7 +74,6 @@ impl Store {
         Ok(n > 0)
     }
 
-    #[allow(dead_code)]
     pub fn mark_seen(&self, accession: &str, form_type: &str, cik: &str) -> rusqlite::Result<()> {
         self.conn.lock().unwrap().execute(
             "INSERT OR IGNORE INTO seen_accessions (accession, form_type, cik) VALUES (?1, ?2, ?3)",
@@ -85,7 +83,6 @@ impl Store {
     }
 
     /// Insert (or update markdown/status/metadata/images on conflict) one EX-10 row.
-    #[allow(dead_code)]
     pub fn upsert_ex10(&self, r: &IngestRecord) -> rusqlite::Result<()> {
         self.conn.lock().unwrap().execute(
             "INSERT INTO ex10_exhibits
@@ -107,7 +104,6 @@ impl Store {
     }
 
     /// Record a non-EX-10 exhibit (metadata only) in `all_exhibits`.
-    #[allow(dead_code)]
     pub fn insert_all_exhibit(&self, r: &IngestRecord) -> rusqlite::Result<()> {
         self.conn.lock().unwrap().execute(
             "INSERT INTO all_exhibits
