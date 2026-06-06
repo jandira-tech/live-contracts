@@ -16,6 +16,10 @@ pub struct Config {
     /// filings RSS drops). Both default on; secinfra::Monitor requires ≥1 true.
     pub use_rss: bool,
     pub use_efts: bool,
+    /// Opt-in local SQLite store path (SEC_STORE_PATH). When set, the producer
+    /// runs the stateful "Python-parity" mode (store + backfill + push + query
+    /// API); when unset (default) it stays the lean stateless inline-POST producer.
+    pub store_path: Option<String>,
     /// LRU capacity for the cross-feed accession dedup cache.
     /// Sized via SEC_ACCESSION_CACHE_SIZE; invalid values fall back to the default.
     pub accession_cache_size: usize,
@@ -71,6 +75,7 @@ impl Config {
             convert_markdown,
             use_rss: flag("SEC_USE_RSS"),
             use_efts: flag("SEC_USE_EFTS"),
+            store_path: get("SEC_STORE_PATH").filter(|s| !s.is_empty()),
             accession_cache_size: get("SEC_ACCESSION_CACHE_SIZE")
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|&n| n > 0)
@@ -103,6 +108,22 @@ mod tests {
         // EFTS as the accuracy backstop for the filings the RSS feed drops.
         assert!(cfg.use_rss);
         assert!(cfg.use_efts);
+        // Stateless by default — no local store.
+        assert!(cfg.store_path.is_none());
+    }
+
+    #[test]
+    fn store_path_enables_stateful_mode() {
+        let off = map(&[("SEC_API_KEY", "k")]);
+        assert!(Config::from_map(|k| off.get(k).cloned()).store_path.is_none());
+        // empty string is treated as unset
+        let empty = map(&[("SEC_API_KEY", "k"), ("SEC_STORE_PATH", "")]);
+        assert!(Config::from_map(|k| empty.get(k).cloned()).store_path.is_none());
+        let on = map(&[("SEC_API_KEY", "k"), ("SEC_STORE_PATH", "/data/sec.db")]);
+        assert_eq!(
+            Config::from_map(|k| on.get(k).cloned()).store_path.as_deref(),
+            Some("/data/sec.db")
+        );
     }
 
     #[test]
