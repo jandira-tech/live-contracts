@@ -53,9 +53,9 @@ impl Store {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
         // Create the parent directory for a file-backed DB so a fresh path (e.g.
         // ./data/store.db) doesn't fail to open. Skipped for in-memory.
-        if path != ":memory:" {
-            if let Some(parent) = std::path::Path::new(path).parent() {
-                if !parent.as_os_str().is_empty() {
+        if path != ":memory:"
+            && let Some(parent) = std::path::Path::new(path).parent()
+                && !parent.as_os_str().is_empty() {
                     std::fs::create_dir_all(parent).map_err(|e| {
                         rusqlite::Error::SqliteFailure(
                             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
@@ -63,8 +63,6 @@ impl Store {
                         )
                     })?;
                 }
-            }
-        }
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         // NORMAL is fully safe under WAL and avoids an fsync per commit.
@@ -169,6 +167,9 @@ mod tests {
             filing_metadata: None,
             image_urls: None,
             markdown: "# x".into(),
+            source: "rss".into(),
+            size_bytes: Some(123),
+            detected_at: "2025-02-01T00:00:00+00:00".into(),
         }
     }
 

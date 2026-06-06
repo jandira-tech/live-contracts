@@ -12,6 +12,9 @@ pub struct Config {
     /// leaves margin; the pipeline throttles fetch_sgml to this rate.
     pub max_rps: u64,
     pub push_batch: usize,
+    /// Max submissions processed concurrently per monitor batch. Floored to 1,
+    /// capped at 50 (SEC rate-limit / resource-exhaustion guard).
+    pub concurrency: usize,
     pub port: u16,
     pub convert_markdown: bool,
     /// Discovery sources. Mirrors datamule's Monitor, which combines the speed of
@@ -19,6 +22,9 @@ pub struct Config {
     /// filings RSS drops). Both default on; secinfra::Monitor requires ≥1 true.
     pub use_rss: bool,
     pub use_efts: bool,
+    /// Optional outbound proxy (SEC_PROXY) for SEC fetches — e.g. to spread load
+    /// across IPs and avoid 429s when running the concurrent producer hot.
+    pub proxy: Option<String>,
     /// Opt-in local SQLite store path (SEC_STORE_PATH). When set, the producer
     /// runs the stateful "Python-parity" mode (store + backfill + push + query
     /// API); when unset (default) it stays the lean stateless inline-POST producer.
@@ -56,6 +62,12 @@ impl Config {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(100)
             .min(200);
+        // Floor 1 (buffer_unordered(0) stalls), cap 50 (rate-limit / resource
+        // guard). clamp(1, 50) == .max(1).min(50); clippy prefers clamp.
+        let concurrency = get("SEC_CONCURRENCY")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(8)
+            .clamp(1, 50);
         // One place for boolean-like env parsing ("false"/"0" → false, default true).
         let flag = |key: &str| get(key).map(|v| v != "false" && v != "0").unwrap_or(true);
         let convert_markdown = flag("SEC_CONVERT_MARKDOWN");
@@ -76,12 +88,14 @@ impl Config {
                 .filter(|&n| n > 0)
                 .unwrap_or(8),
             push_batch,
+            concurrency,
             port: get("PORT")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(7860),
             convert_markdown,
             use_rss: flag("SEC_USE_RSS"),
             use_efts: flag("SEC_USE_EFTS"),
+            proxy: get("SEC_PROXY").filter(|s| !s.is_empty()),
             store_path: get("SEC_STORE_PATH").filter(|s| !s.is_empty()),
             accession_cache_size: get("SEC_ACCESSION_CACHE_SIZE")
                 .and_then(|v| v.parse::<usize>().ok())
@@ -109,6 +123,7 @@ mod tests {
         assert_eq!(cfg.poll_interval_ms, 200);
         assert_eq!(cfg.max_rps, 8); // SEC-courtesy default, under the 10/s cap
         assert_eq!(cfg.push_batch, 100);
+        assert_eq!(cfg.concurrency, 8);
         assert_eq!(cfg.port, 7860);
         assert!(cfg.convert_markdown);
         assert!(cfg.hf_token.is_none());
@@ -157,6 +172,31 @@ mod tests {
         // requires at least one to be true (enforced by secinfra::Monitor).
         assert!(!cfg.use_rss);
         assert!(!cfg.use_efts);
+    }
+
+    #[test]
+    fn concurrency_overrides_and_floors_to_one() {
+        let over = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "32")]);
+        let cfg = Config::from_map(|k| over.get(k).cloned());
+        assert_eq!(cfg.concurrency, 32);
+
+        // "0" must floor to 1 — buffer_unordered(0) would stall the stream.
+        let zero = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "0")]);
+        let cfg = Config::from_map(|k| zero.get(k).cloned());
+        assert_eq!(cfg.concurrency, 1);
+
+        // Garbage → default 8.
+        let bad = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "abc")]);
+        let cfg = Config::from_map(|k| bad.get(k).cloned());
+        assert_eq!(cfg.concurrency, 8);
+    }
+
+    #[test]
+    fn concurrency_is_capped_at_50() {
+        // Cap to avoid SEC rate-limit / resource exhaustion under huge env values.
+        let huge = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "100")]);
+        let cfg = Config::from_map(|k| huge.get(k).cloned());
+        assert_eq!(cfg.concurrency, 50);
     }
 
     #[test]

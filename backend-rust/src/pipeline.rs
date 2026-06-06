@@ -1,18 +1,32 @@
 use crate::config::Config;
-use crate::extract::{fetch_sgml, filing_url, gather, header_events, Ex10Doc};
+use crate::extract::{fetch_sgml, filing_url, gather, header_events, DocMeta, Ex10Doc};
 use crate::header::header_json;
 use crate::images::{capture_images_with, hf_upload, image_filenames, is_image_only};
 use crate::ingest::{resolve_filed_at, IngestRecord};
 use crate::markdown::{html_to_markdown, status_for};
 use secinfra::{ParsedSgml, ParsedSubmissionMetadata, Submission};
 use std::collections::HashSet;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Delay needed to keep SEC fetches at/under the configured rate: the remaining
-/// time in the minimum inter-fetch interval, or zero once enough has elapsed.
-/// SEC caps clients at 10 req/s — the run loop sleeps this before each fetch.
-pub fn throttle_delay(min_interval: Duration, since_last: Duration) -> Duration {
-    min_interval.saturating_sub(since_last)
+/// Map a discovery source to its canonical lowercase wire string.
+pub fn source_str(source: secinfra::SubmissionSource) -> &'static str {
+    match source {
+        secinfra::SubmissionSource::Rss => "rss",
+        secinfra::SubmissionSource::Efts => "efts",
+    }
+}
+
+/// Fields shared by every record in one filing.
+pub struct RecordMeta<'a> {
+    pub accession: &'a str,
+    pub cik: &'a str,
+    pub form_type: &'a str,
+    pub filing_url: &'a str,
+    pub found_at: &'a str,
+    pub detected_at: &'a str,
+    pub source: &'a str,
+    pub size_bytes: Option<u64>,
+    pub filing_metadata: Option<&'a str>,
 }
 
 /// A processed EX-10 document ready to become a record.
@@ -23,38 +37,36 @@ pub struct DocResult {
     pub image_urls: Option<Vec<String>>,
 }
 
-/// Pure: assemble ingest records for one filing. `id_counter` is the
-/// monotonic per-process echo token, bumped once per record.
-#[allow(clippy::too_many_arguments)]
+/// Pure: assemble ingest records for one filing. `id_counter` is the shared
+/// per-process echo token, bumped once per record (D1 mints the real UUIDv7,
+/// so only per-process uniqueness matters — Relaxed ordering is sufficient).
 pub fn build_records(
-    id_counter: &mut u64,
-    accession: &str,
-    cik: &str,
-    form_type: &str,
-    filing_url: &str,
-    found_at: &str,
-    filing_metadata: Option<&str>,
+    id_counter: &AtomicU64,
+    meta: &RecordMeta<'_>,
     docs: Vec<DocResult>,
 ) -> Vec<IngestRecord> {
     docs.into_iter()
         .map(|d| {
-            *id_counter += 1;
+            let id = id_counter.fetch_add(1, Ordering::Relaxed) + 1;
             IngestRecord {
-                id: *id_counter,
-                accession: accession.to_string(),
-                cik: cik.to_string(),
-                form_type: form_type.to_string(),
+                id,
+                accession: meta.accession.to_string(),
+                cik: meta.cik.to_string(),
+                form_type: meta.form_type.to_string(),
                 doc_type: d.doc.doc_type,
                 filename: d.doc.filename,
                 description: d.doc.description,
                 sequence: d.doc.sequence,
-                filing_url: filing_url.to_string(),
-                found_at: found_at.to_string(),
-                filed_at: resolve_filed_at("", filing_metadata),
+                filing_url: meta.filing_url.to_string(),
+                found_at: meta.found_at.to_string(),
+                filed_at: resolve_filed_at("", meta.filing_metadata),
                 markdown_status: d.status,
-                filing_metadata: filing_metadata.map(|s| s.to_string()),
+                filing_metadata: meta.filing_metadata.map(|s| s.to_string()),
                 image_urls: d.image_urls.map(|u| serde_json::to_string(&u).unwrap_or_else(|_| "[]".into())),
                 markdown: d.markdown,
+                source: meta.source.to_string(),
+                size_bytes: meta.size_bytes,
+                detected_at: meta.detected_at.to_string(),
             }
         })
         .collect()
@@ -85,13 +97,78 @@ impl Processed {
     }
 }
 
+/// One EX-10 doc after the CPU-bound markdown conversion (owned, `'static`).
+struct ParsedDoc {
+    doc: Ex10Doc,
+    markdown: String,
+    status: String,
+}
+
+/// Fully owned output of the CPU-bound parse/convert section, safe to return
+/// across the `spawn_blocking` await boundary.
+struct ParsedSubmission {
+    docs: Vec<ParsedDoc>,
+    graphics: Vec<(String, Vec<u8>)>,
+    meta_json: String,
+    /// Non-EX-10 exhibit metadata, captured for `all_exhibits` in stateful mode.
+    others: Vec<DocMeta>,
+}
+
+/// CPU-bound: parse SGML, gather EX-10 + graphics, convert each EX-10 to
+/// markdown, and build the header meta JSON. Returns `None` only when there is
+/// nothing to emit — a parse error, or no EX-10 docs *and* `capture_all` is off
+/// (stateful mode still wants the other exhibits' metadata). Runs inside
+/// `spawn_blocking` so it never blocks the async runtime.
+fn parse_submission_blocking(
+    sgml: &[u8],
+    convert_markdown: bool,
+    capture_all: bool,
+    accession_str: &str,
+) -> Option<ParsedSubmission> {
+    let parsed = match ParsedSgml::parse(sgml) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("SGML parse failed for {accession_str}: {e}");
+            return None;
+        }
+    };
+    let gathered = gather(&parsed);
+    if gathered.ex10.is_empty() && !capture_all {
+        return None;
+    }
+    // Only parse header metadata when there's an EX-10 doc to attach it to.
+    let meta_json = if gathered.ex10.is_empty() {
+        header_json(&[])
+    } else {
+        match ParsedSubmissionMetadata::parse(sgml) {
+            Ok(m) => header_json(&header_events(&m)),
+            Err(_) => header_json(&[]),
+        }
+    };
+
+    let docs = gathered
+        .ex10
+        .into_iter()
+        .map(|doc| {
+            let html = String::from_utf8_lossy(&doc.content);
+            let markdown = if convert_markdown { html_to_markdown(&html) } else { String::new() };
+            let status = status_for(&markdown).as_str().to_string();
+            ParsedDoc { doc, markdown, status }
+        })
+        .collect();
+
+    let others = if capture_all { gathered.others } else { Vec::new() };
+    Some(ParsedSubmission { docs, graphics: gathered.graphics, meta_json, others })
+}
+
 /// Process one submission end-to-end. Never panics. In stateless mode it returns
 /// only EX-10 records (and skips filings with none); when `cfg.store_path` is set
-/// it also returns every non-EX-10 exhibit's metadata for `all_exhibits`.
+/// (stateful mode) it also returns every non-EX-10 exhibit's metadata for
+/// `all_exhibits`. Safe to call concurrently — `id_counter` is shared atomically.
 pub async fn process_submission(
     client: &reqwest::Client,
     cfg: &Config,
-    id_counter: &mut u64,
+    id_counter: &AtomicU64,
     sub: &Submission,
 ) -> Processed {
     let cik = match sub.ciks.first() {
@@ -101,7 +178,11 @@ pub async fn process_submission(
     let capture_all = cfg.store_path.is_some();
     let accession_str = secinfra::format_accession_int(sub.accession, "dash");
     let f_url = filing_url(sub.accession, cik);
-    let found_at = sub.detected_time.to_rfc3339();
+    // Display form for the D1 frontend's `found_at >= datetime('now',...)` string
+    // comparison/sort; the precise machine timestamp lives in `detected_at`.
+    let found_at = sub.detected_time.format("%Y-%m-%d %H:%M:%S").to_string();
+    let detected_at = sub.detected_time.to_rfc3339();
+    let source = source_str(sub.source);
 
     let sgml = match fetch_sgml(client, sub.accession, cik).await {
         Ok(b) => b,
@@ -111,64 +192,30 @@ pub async fn process_submission(
         }
     };
 
-    // Scope parsed SGML so the borrow is dropped before any .await.
-    let (gathered, meta_json) = {
-        let parsed = match ParsedSgml::parse(&sgml) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("SGML parse failed for {accession_str}: {e}");
-                return Processed::empty();
-            }
-        };
-        let g = gather(&parsed);
-        // Stateless mode only cares about EX-10; skip filings with none. Stateful
-        // mode records other exhibits too, so process those even without EX-10.
-        if g.ex10.is_empty() && !capture_all {
+    // The CPU-bound section (SGML parse, gather, HTML→markdown) blocks the Tokio
+    // worker thread driving the `buffer_unordered` stream; offload it to a blocking
+    // thread so it can't stall the async runtime (e.g. the health server). The
+    // closure takes ownership of the fetched bytes + needed cfg flags and returns
+    // fully owned data — no borrows survive the await boundary.
+    let convert_markdown = cfg.convert_markdown;
+    let accession_for_blocking = accession_str.clone();
+    let parsed = tokio::task::spawn_blocking(move || {
+        parse_submission_blocking(&sgml, convert_markdown, capture_all, &accession_for_blocking)
+    })
+    .await;
+    let ParsedSubmission { docs, graphics, meta_json, others: other_metas } = match parsed {
+        Ok(Some(p)) => p,
+        Ok(None) => return Processed::empty(),
+        Err(e) => {
+            tracing::warn!("parse task failed for {accession_str}: {e}");
             return Processed::empty();
         }
-        let meta = if g.ex10.is_empty() {
-            header_json(&[])
-        } else {
-            match ParsedSubmissionMetadata::parse(&sgml) {
-                Ok(m) => header_json(&header_events(&m)),
-                Err(_) => header_json(&[]),
-            }
-        };
-        (g, meta)
     };
 
-    // Non-EX-10 exhibits → metadata-only records for all_exhibits (stateful only).
-    let others: Vec<IngestRecord> = if capture_all {
-        gathered
-            .others
-            .iter()
-            .map(|m| IngestRecord {
-                id: 0,
-                accession: accession_str.clone(),
-                cik: cik.to_string(),
-                form_type: sub.submission_type.clone(),
-                doc_type: m.doc_type.clone(),
-                filename: m.filename.clone(),
-                description: m.description.clone(),
-                sequence: m.sequence.clone(),
-                filing_url: f_url.clone(),
-                found_at: found_at.clone(),
-                filed_at: String::new(),
-                markdown_status: String::new(),
-                filing_metadata: None,
-                image_urls: None,
-                markdown: String::new(),
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-
+    // Image capture is async (network) — run it here on the owned parse output.
     let mut results = Vec::new();
-    for doc in gathered.ex10 {
-        let html = String::from_utf8_lossy(&doc.content);
-        let md = if cfg.convert_markdown { html_to_markdown(&html) } else { String::new() };
-        let status = status_for(&md).as_str().to_string();
+    for parsed_doc in docs {
+        let ParsedDoc { doc, markdown: md, status } = parsed_doc;
 
         // image-only → capture this doc's images (best-effort).
         let mut image_urls: Option<Vec<String>> = None;
@@ -180,7 +227,7 @@ pub async fn process_submission(
             let repo_for_closure = repo.clone();
             let urls = capture_images_with(
                 &accession_str,
-                gathered.graphics.clone(),
+                graphics.clone(),
                 Some(&only_refs),
                 &repo,
                 move |uploads| {
@@ -204,16 +251,44 @@ pub async fn process_submission(
         });
     }
 
-    let ex10 = build_records(
-        id_counter,
-        &accession_str,
-        &cik.to_string(),
-        &sub.submission_type,
-        &f_url,
-        &found_at,
-        Some(&meta_json),
-        results,
-    );
+    let meta = RecordMeta {
+        accession: &accession_str,
+        cik: &cik.to_string(),
+        form_type: &sub.submission_type,
+        filing_url: &f_url,
+        found_at: &found_at,
+        detected_at: &detected_at,
+        source,
+        size_bytes: sub.size_bytes,
+        filing_metadata: Some(&meta_json),
+    };
+    let ex10 = build_records(id_counter, &meta, results);
+
+    // Stateful mode: metadata-only rows for every non-EX-10 exhibit, carrying the
+    // same submission-level fields (source/size_bytes/detected_at included).
+    let others: Vec<IngestRecord> = other_metas
+        .into_iter()
+        .map(|m| IngestRecord {
+            id: 0,
+            accession: accession_str.clone(),
+            cik: cik.to_string(),
+            form_type: sub.submission_type.clone(),
+            doc_type: m.doc_type,
+            filename: m.filename,
+            description: m.description,
+            sequence: m.sequence,
+            filing_url: f_url.clone(),
+            found_at: found_at.clone(),
+            filed_at: String::new(),
+            markdown_status: String::new(),
+            filing_metadata: None,
+            image_urls: None,
+            markdown: String::new(),
+            source: source.to_string(),
+            size_bytes: sub.size_bytes,
+            detected_at: detected_at.clone(),
+        })
+        .collect();
 
     Processed {
         accession: accession_str,
@@ -228,20 +303,6 @@ pub async fn process_submission(
 mod tests {
     use super::*;
     use crate::extract::Ex10Doc;
-
-    #[test]
-    fn throttle_delay_caps_fetch_rate() {
-        // 8 rps → 125ms min interval. Not enough time passed → sleep the remainder.
-        assert_eq!(
-            throttle_delay(Duration::from_millis(125), Duration::from_millis(40)),
-            Duration::from_millis(85)
-        );
-        // Enough (or more) time passed → no delay.
-        assert_eq!(
-            throttle_delay(Duration::from_millis(125), Duration::from_millis(200)),
-            Duration::ZERO
-        );
-    }
 
     fn doc(dt: &str, fname: &str) -> Ex10Doc {
         Ex10Doc { doc_type: dt.into(), filename: fname.into(),
@@ -264,10 +325,20 @@ mod tests {
                 image_urls: Some(vec!["https://hf/x.jpg".into()]),
             },
         ];
+        let counter = AtomicU64::new(0);
         let recs = build_records(
-            &mut 0, "0001-25-000001", "123", "8-K",
-            "https://sec.gov/f.txt", "2025-02-01T00:00:00Z",
-            Some("{\"filed_at\":\"20250201080000\"}"),
+            &counter,
+            &RecordMeta {
+                accession: "0001-25-000001",
+                cik: "123",
+                form_type: "8-K",
+                filing_url: "https://sec.gov/f.txt",
+                found_at: "2025-02-01 08:00:00",
+                detected_at: "2025-02-01T08:00:00.123456+00:00",
+                source: "efts",
+                size_bytes: Some(4096),
+                filing_metadata: Some("{\"filed_at\":\"20250201080000\"}"),
+            },
             inputs,
         );
         assert_eq!(recs.len(), 2);
@@ -279,5 +350,17 @@ mod tests {
         assert_eq!(recs[0].image_urls, None);
         assert_eq!(recs[1].markdown_status, "empty");
         assert_eq!(recs[1].image_urls, Some("[\"https://hf/x.jpg\"]".into()));
+        // New fields: display found_at, precise detected_at, source, size_bytes.
+        assert_eq!(recs[0].found_at, "2025-02-01 08:00:00");
+        assert_eq!(recs[0].detected_at, "2025-02-01T08:00:00.123456+00:00");
+        assert_eq!(recs[0].source, "efts");
+        assert_eq!(recs[0].size_bytes, Some(4096));
+        assert_eq!(recs[1].size_bytes, Some(4096));
+    }
+
+    #[test]
+    fn source_str_maps_to_lowercase() {
+        assert_eq!(source_str(secinfra::SubmissionSource::Rss), "rss");
+        assert_eq!(source_str(secinfra::SubmissionSource::Efts), "efts");
     }
 }

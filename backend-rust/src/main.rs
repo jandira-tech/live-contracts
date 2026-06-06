@@ -16,15 +16,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) {
     let ua = secinfra::sec_user_agent();
-    let client = reqwest::Client::builder()
-        .user_agent(&ua)
-        .build()
-        .expect("reqwest client");
+    let mut builder = reqwest::Client::builder().user_agent(&ua);
+    if let Some(proxy_url) = cfg.proxy.as_deref() {
+        match reqwest::Proxy::all(proxy_url) {
+            Ok(p) => {
+                tracing::info!("routing SEC fetches through proxy {proxy_url}");
+                builder = builder.proxy(p);
+            }
+            Err(e) => tracing::error!("invalid SEC_PROXY {proxy_url:?}: {e}; ignoring"),
+        }
+    }
+    let client = builder.build().expect("reqwest client");
 
     // Mimic datamule: RSS (fast, lossy) + EFTS (slower, sweeps up RSS's misses).
     // Both default on via Config; either can be disabled with SEC_USE_RSS /
     // SEC_USE_EFTS. secinfra::Monitor::build() panics if neither is enabled.
-    // Cache dedups accessions seen across RSS + EFTS so each filing emits once.
+    // The accession cache dedups submissions seen across RSS + EFTS so each
+    // filing is processed once.
     let monitor = secinfra::Monitor::new()
         .polling_interval_ms(cfg.poll_interval_ms)
         .use_rss(cfg.use_rss)
@@ -32,14 +40,17 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
         .with_cache(secinfra::AccessionCache::new(cfg.accession_cache_size))
         .build();
 
-    let mut id_counter: u64 = 0u64;
-    // Throttle SEC fetches to <= cfg.max_rps (SEC caps clients at 10 req/s). The
-    // loop is sequential, so one gate before each submission paces fetch_sgml.
-    // Nanosecond precision so rates that don't divide 1000 (3/6/7/9 rps) aren't
-    // truncated. `last_fetch` starts as None — the first fetch never waits, and
-    // we avoid Instant underflow on a freshly-started monotonic clock.
-    let min_interval = std::time::Duration::from_nanos(1_000_000_000 / cfg.max_rps.max(1));
-    let mut last_fetch: Option<std::time::Instant> = None;
+    // Shared echo-token counter (D1 mints the real UUIDv7, so we only need
+    // per-process uniqueness — safe to share across concurrent tasks).
+    let id_counter = Arc::new(AtomicU64::new(0));
+
+    // Proactive global pace: even with `cfg.concurrency` workers in flight, keep
+    // fetch *starts* at/under cfg.max_rps so we don't machine-gun SEC (it caps
+    // clients at 10/s). The reactive 429 backoff in fetch_sgml handles the rest.
+    let min_fetch_interval =
+        std::time::Duration::from_nanos(1_000_000_000 / cfg.max_rps.max(1));
+    let fetch_gate = Arc::new(tokio::sync::Mutex::new(None::<std::time::Instant>));
+
     use futures::StreamExt;
     let mut stream = std::pin::pin!(monitor);
 
@@ -52,71 +63,99 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
             }
         };
 
-        for sub in batch {
-            let accession = sub.accession;
-            let form = sub.submission_type.clone();
-            tracing::debug!(size_bytes = ?sub.size_bytes, "processing {accession} ({form})");
+        // Process the batch concurrently (bounded by cfg.concurrency). Each task
+        // POSTs its own records; order across submissions may interleave.
+        futures::stream::iter(batch)
+            .map(|sub| {
+                // Clone the cheap handles into the future so each one is `'static`
+                // (reqwest::Client is an Arc internally; Config/HealthState/the
+                // counter are Arc/cheap). This is what lets process_submission use
+                // spawn_blocking without borrowing the surrounding scope.
+                let client = client.clone();
+                let cfg = cfg.clone();
+                let state = state.clone();
+                let id_counter = id_counter.clone();
+                let store = store.clone();
+                let fetch_gate = fetch_gate.clone();
+                async move {
+                    let accession = sub.accession;
+                    let form = sub.submission_type.clone();
+                    tracing::debug!(size_bytes = ?sub.size_bytes, "processing {accession} ({form})");
 
-            // SEC-courtesy rate limit before the per-submission SGML fetch.
-            let delay = last_fetch
-                .map(|lf| pipeline::throttle_delay(min_interval, lf.elapsed()))
-                .unwrap_or(std::time::Duration::ZERO);
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-            last_fetch = Some(std::time::Instant::now());
+                    // Global rate gate: wait until min_fetch_interval has elapsed
+                    // since the last worker's fetch start, then claim this slot.
+                    {
+                        let mut last = fetch_gate.lock().await;
+                        if let Some(prev) = *last {
+                            let elapsed = prev.elapsed();
+                            if elapsed < min_fetch_interval {
+                                tokio::time::sleep(min_fetch_interval - elapsed).await;
+                            }
+                        }
+                        *last = Some(std::time::Instant::now());
+                    }
 
-            let p = pipeline::process_submission(&client, &cfg, &mut id_counter, &sub).await;
-            if p.is_empty() {
-                continue;
-            }
+                    let p = pipeline::process_submission(&client, &cfg, &id_counter, &sub).await;
+                    if p.is_empty() {
+                        return;
+                    }
 
-            if let Some(store) = &store {
-                // Stateful mode: persist to the local store (like the Python
-                // worker); the D1 push happens from the store in a later PR.
-                // Mark the accession seen only AFTER its rows land — otherwise a
-                // failed insert leaves it recorded as seen and backfill/resume
-                // would skip it, silently dropping that filing's exhibits.
-                let mut writes_ok = true;
-                for r in &p.ex10 {
-                    if let Err(e) = store.upsert_ex10(r) {
-                        tracing::warn!("store upsert_ex10 failed for {}: {e}", p.accession);
-                        writes_ok = false;
+                    if let Some(store) = &store {
+                        // Stateful mode (default when SEC_STORE_PATH is set): persist
+                        // EX-10 + other exhibits, then mark the accession seen only
+                        // after the writes land so a failed insert stays retryable.
+                        let mut writes_ok = true;
+                        for r in &p.ex10 {
+                            if let Err(e) = store.upsert_ex10(r) {
+                                tracing::warn!("store upsert_ex10 failed for {}: {e}", p.accession);
+                                writes_ok = false;
+                            }
+                        }
+                        for r in &p.others {
+                            if let Err(e) = store.insert_all_exhibit(r) {
+                                tracing::warn!(
+                                    "store insert_all_exhibit failed for {}: {e}",
+                                    p.accession
+                                );
+                                writes_ok = false;
+                            }
+                        }
+                        if writes_ok
+                            && let Err(e) = store.mark_seen(&p.accession, &p.form_type, &p.cik) {
+                                tracing::warn!("store mark_seen failed for {}: {e}", p.accession);
+                            }
+                        if !p.ex10.is_empty() {
+                            state.total_seen.fetch_add(1, Ordering::Relaxed);
+                        }
+                        tracing::info!(
+                            "stored {} EX-10 + {} other exhibits for {}",
+                            p.ex10.len(),
+                            p.others.len(),
+                            p.accession
+                        );
+                    } else {
+                        // Stateless mode: POST EX-10 records straight to /api/ingest.
+                        if p.ex10.is_empty() {
+                            return;
+                        }
+                        state.total_seen.fetch_add(1, Ordering::Relaxed);
+                        let chunks = ingest::chunk_rows(&p.ex10, cfg.push_batch);
+                        for chunk in chunks {
+                            let n = ingest::post_batch(
+                                &client,
+                                &cfg.ingest_url,
+                                &cfg.api_key,
+                                chunk,
+                            )
+                            .await;
+                            tracing::info!("ingested {n} records for {accession}");
+                        }
                     }
                 }
-                for r in &p.others {
-                    if let Err(e) = store.insert_all_exhibit(r) {
-                        tracing::warn!("store insert_all_exhibit failed for {}: {e}", p.accession);
-                        writes_ok = false;
-                    }
-                }
-                if writes_ok {
-                    if let Err(e) = store.mark_seen(&p.accession, &p.form_type, &p.cik) {
-                        tracing::warn!("store mark_seen failed for {}: {e}", p.accession);
-                    }
-                }
-                if !p.ex10.is_empty() {
-                    state.total_seen.fetch_add(1, Ordering::Relaxed);
-                }
-                tracing::info!(
-                    "stored {} EX-10 + {} other exhibits for {}",
-                    p.ex10.len(),
-                    p.others.len(),
-                    p.accession
-                );
-            } else {
-                // Stateless mode: POST EX-10 records straight to the ingest route.
-                if p.ex10.is_empty() {
-                    continue;
-                }
-                state.total_seen.fetch_add(1, Ordering::Relaxed);
-                let chunks = ingest::chunk_rows(&p.ex10, cfg.push_batch);
-                for chunk in chunks {
-                    let n = ingest::post_batch(&client, &cfg.ingest_url, &cfg.api_key, chunk).await;
-                    tracing::info!("ingested {n} records for {}", p.accession);
-                }
-            }
-        }
+            })
+            .buffer_unordered(cfg.concurrency)
+            .for_each(|()| async {})
+            .await;
     }
 }
 
@@ -137,9 +176,8 @@ fn main() {
     }
     tracing::info!("starting sec-ex10-rust on port {}", cfg.port);
 
-    // Opt-in stateful mode: open the local SQLite store (fail fast on a bad path).
-    // When set, the pipeline persists every exhibit to the store instead of
-    // POSTing EX-10 inline; unset keeps the lean stateless producer.
+    // Opt-in stateful mode (default when SEC_STORE_PATH is set): open the local
+    // SQLite store; unset keeps the lean stateless inline-POST producer.
     let store: Option<Arc<store::Store>> = match cfg.store_path.as_deref() {
         Some(path) => match store::Store::open(path).and_then(|s| {
             s.init()?;

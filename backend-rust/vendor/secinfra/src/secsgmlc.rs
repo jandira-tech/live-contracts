@@ -29,6 +29,9 @@ struct RawDocument {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// Variants map to C FFI return codes; `Oom`/`Truncated` are intentionally
+// retained for completeness even though the happy path only constructs `Ok`.
+#[allow(dead_code)]
 pub enum SgmlStatus {
     Ok = 0,
     Oom = 1,
