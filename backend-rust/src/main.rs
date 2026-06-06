@@ -33,6 +33,13 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
         .build();
 
     let mut id_counter: u64 = 0u64;
+    // Throttle SEC fetches to <= cfg.max_rps (SEC caps clients at 10 req/s). The
+    // loop is sequential, so one gate before each submission paces fetch_sgml.
+    // Nanosecond precision so rates that don't divide 1000 (3/6/7/9 rps) aren't
+    // truncated. `last_fetch` starts as None — the first fetch never waits, and
+    // we avoid Instant underflow on a freshly-started monotonic clock.
+    let min_interval = std::time::Duration::from_nanos(1_000_000_000 / cfg.max_rps.max(1));
+    let mut last_fetch: Option<std::time::Instant> = None;
     use futures::StreamExt;
     let mut stream = std::pin::pin!(monitor);
 
@@ -50,6 +57,15 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
             let form = sub.submission_type.clone();
             tracing::debug!(size_bytes = ?sub.size_bytes, "processing {accession} ({form})");
 
+            // SEC-courtesy rate limit before the per-submission SGML fetch.
+            let delay = last_fetch
+                .map(|lf| pipeline::throttle_delay(min_interval, lf.elapsed()))
+                .unwrap_or(std::time::Duration::ZERO);
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            last_fetch = Some(std::time::Instant::now());
+
             let p = pipeline::process_submission(&client, &cfg, &mut id_counter, &sub).await;
             if p.is_empty() {
                 continue;
@@ -58,17 +74,25 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
             if let Some(store) = &store {
                 // Stateful mode: persist to the local store (like the Python
                 // worker); the D1 push happens from the store in a later PR.
-                if let Err(e) = store.mark_seen(&p.accession, &p.form_type, &p.cik) {
-                    tracing::warn!("store mark_seen failed for {}: {e}", p.accession);
-                }
+                // Mark the accession seen only AFTER its rows land — otherwise a
+                // failed insert leaves it recorded as seen and backfill/resume
+                // would skip it, silently dropping that filing's exhibits.
+                let mut writes_ok = true;
                 for r in &p.ex10 {
                     if let Err(e) = store.upsert_ex10(r) {
                         tracing::warn!("store upsert_ex10 failed for {}: {e}", p.accession);
+                        writes_ok = false;
                     }
                 }
                 for r in &p.others {
                     if let Err(e) = store.insert_all_exhibit(r) {
                         tracing::warn!("store insert_all_exhibit failed for {}: {e}", p.accession);
+                        writes_ok = false;
+                    }
+                }
+                if writes_ok {
+                    if let Err(e) = store.mark_seen(&p.accession, &p.form_type, &p.cik) {
+                        tracing::warn!("store mark_seen failed for {}: {e}", p.accession);
                     }
                 }
                 if !p.ex10.is_empty() {

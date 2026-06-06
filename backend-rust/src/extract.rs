@@ -49,17 +49,15 @@ pub fn gather(parsed: &ParsedSgml) -> Gathered {
             continue;
         }
         // Every non-EX-10 document → all_exhibits metadata (mirrors Python's split).
+        let filename = s(d.filename());
         others.push(DocMeta {
             doc_type: dt.clone(),
-            filename: s(d.filename()),
+            filename: filename.clone(),
             description: s(d.description()),
             sequence: s(d.sequence()),
         });
-        if dt == "GRAPHIC" {
-            let fname = s(d.filename());
-            if !fname.is_empty() {
-                graphics.push((fname, d.content().to_vec()));
-            }
+        if dt == "GRAPHIC" && !filename.is_empty() {
+            graphics.push((filename, d.content().to_vec()));
         }
     }
     Gathered { ex10, graphics, others }

@@ -32,10 +32,12 @@ CREATE TABLE IF NOT EXISTS all_exhibits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     accession TEXT, cik TEXT, form_type TEXT, doc_type TEXT, filename TEXT,
     description TEXT, sequence TEXT, filing_url TEXT,
-    found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(accession, doc_type, filename)
 );
 CREATE TABLE IF NOT EXISTS rss_entries (
-    accession TEXT, cik TEXT, form_type TEXT, filing_date TEXT,
+    accession TEXT PRIMARY KEY,
+    cik TEXT, form_type TEXT, filing_date TEXT,
     rss_summary TEXT, processed BOOLEAN DEFAULT 0,
     first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -49,8 +51,24 @@ impl Store {
     /// Open a store at `path` (a file, or ":memory:" for tests). Sets WAL so the
     /// query API can read while the pipeline writes.
     pub fn open(path: &str) -> rusqlite::Result<Self> {
+        // Create the parent directory for a file-backed DB so a fresh path (e.g.
+        // ./data/store.db) doesn't fail to open. Skipped for in-memory.
+        if path != ":memory:" {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        rusqlite::Error::SqliteFailure(
+                            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+                            Some(format!("create parent dir {}: {e}", parent.display())),
+                        )
+                    })?;
+                }
+            }
+        }
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
+        // NORMAL is fully safe under WAL and avoids an fsync per commit.
+        conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.busy_timeout(std::time::Duration::from_secs(30))?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -93,7 +111,12 @@ impl Store {
                markdown         = excluded.markdown,
                markdown_status  = excluded.markdown_status,
                filing_metadata  = excluded.filing_metadata,
-               image_urls       = excluded.image_urls",
+               image_urls       = excluded.image_urls,
+               -- Re-mirror only when the image set actually changed; a markdown-only
+               -- re-push must not force the mirror worker to redo unchanged images.
+               -- `IS NOT` is the NULL-safe comparison.
+               mirrored         = CASE WHEN excluded.image_urls IS NOT image_urls THEN 0 ELSE mirrored END,
+               image_attempts   = CASE WHEN excluded.image_urls IS NOT image_urls THEN 0 ELSE image_attempts END",
             rusqlite::params![
                 r.accession, r.cik, r.form_type, r.doc_type, r.filename, r.description,
                 r.sequence, r.filing_url, r.found_at, r.markdown, r.markdown_status,
@@ -106,7 +129,7 @@ impl Store {
     /// Record a non-EX-10 exhibit (metadata only) in `all_exhibits`.
     pub fn insert_all_exhibit(&self, r: &IngestRecord) -> rusqlite::Result<()> {
         self.conn.lock().unwrap().execute(
-            "INSERT INTO all_exhibits
+            "INSERT OR IGNORE INTO all_exhibits
                (accession, cik, form_type, doc_type, filename, description, sequence, filing_url, found_at)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             rusqlite::params![
@@ -202,5 +225,57 @@ mod tests {
             .query_row("SELECT count(*) FROM all_exhibits", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn all_exhibits_dedupes_on_accession_doctype_filename() {
+        // INSERT OR IGNORE + UNIQUE(accession, doc_type, filename): re-inserting the
+        // same exhibit must not accumulate duplicate rows.
+        let s = mem();
+        s.insert_all_exhibit(&rec("EX-21", "subs.htm")).unwrap();
+        s.insert_all_exhibit(&rec("EX-21", "subs.htm")).unwrap();
+        let conn = s.conn.lock().unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM all_exhibits", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    fn mirrored_of(s: &Store, filename: &str) -> i64 {
+        s.conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT mirrored FROM ex10_exhibits WHERE filename = ?1",
+                [filename],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn upsert_ex10_resets_mirror_only_when_images_change() {
+        let s = mem();
+        let mut r = rec("EX-10.1", "a.htm");
+        r.image_urls = Some("[\"img1\"]".into());
+        s.upsert_ex10(&r).unwrap();
+        // Pretend a downstream worker mirrored it.
+        s.conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE ex10_exhibits SET mirrored = 1, image_attempts = 3", [])
+            .unwrap();
+
+        // Markdown-only re-push (same images) must NOT reset the mirror state.
+        let mut same = r.clone();
+        same.markdown = "# updated".into();
+        s.upsert_ex10(&same).unwrap();
+        assert_eq!(mirrored_of(&s, "a.htm"), 1, "unchanged images should keep mirrored=1");
+
+        // New images must reset mirrored/image_attempts so they get re-mirrored.
+        let mut changed = r.clone();
+        changed.image_urls = Some("[\"img1\",\"img2\"]".into());
+        s.upsert_ex10(&changed).unwrap();
+        assert_eq!(mirrored_of(&s, "a.htm"), 0, "changed images should reset mirrored=0");
     }
 }

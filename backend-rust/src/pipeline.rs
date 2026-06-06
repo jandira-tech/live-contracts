@@ -6,6 +6,14 @@ use crate::ingest::{resolve_filed_at, IngestRecord};
 use crate::markdown::{html_to_markdown, status_for};
 use secinfra::{ParsedSgml, ParsedSubmissionMetadata, Submission};
 use std::collections::HashSet;
+use std::time::Duration;
+
+/// Delay needed to keep SEC fetches at/under the configured rate: the remaining
+/// time in the minimum inter-fetch interval, or zero once enough has elapsed.
+/// SEC caps clients at 10 req/s — the run loop sleeps this before each fetch.
+pub fn throttle_delay(min_interval: Duration, since_last: Duration) -> Duration {
+    min_interval.saturating_sub(since_last)
+}
 
 /// A processed EX-10 document ready to become a record.
 pub struct DocResult {
@@ -220,6 +228,20 @@ pub async fn process_submission(
 mod tests {
     use super::*;
     use crate::extract::Ex10Doc;
+
+    #[test]
+    fn throttle_delay_caps_fetch_rate() {
+        // 8 rps → 125ms min interval. Not enough time passed → sleep the remainder.
+        assert_eq!(
+            throttle_delay(Duration::from_millis(125), Duration::from_millis(40)),
+            Duration::from_millis(85)
+        );
+        // Enough (or more) time passed → no delay.
+        assert_eq!(
+            throttle_delay(Duration::from_millis(125), Duration::from_millis(200)),
+            Duration::ZERO
+        );
+    }
 
     fn doc(dt: &str, fname: &str) -> Ex10Doc {
         Ex10Doc { doc_type: dt.into(), filename: fname.into(),
