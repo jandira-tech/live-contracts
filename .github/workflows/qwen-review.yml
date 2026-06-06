@@ -1,9 +1,9 @@
 name: qwen-review
 
-# Self-hosted PR review using Alibaba Bailian Coding Plan (Qwen3.6 Plus) via opencode.
+# Self-hosted PR review using Alibaba Bailian Coding Plan (Qwen3-Coder-Plus) via opencode.
 # Two INDEPENDENT jobs:
 #   - static:   fast static analysis (Python/TS/Rust). Report-only, never blocks.
-#   - opencode: LLM review with Qwen3.6 Plus. Has NO `needs:` on static, so it
+#   - opencode: LLM review with Qwen3-Coder-Plus. Has NO `needs:` on static, so it
 #               runs no matter what — even if static fails or is skipped.
 
 on:
@@ -85,11 +85,11 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # LLM review — Qwen3.6 Plus via opencode + the Bailian OpenAI-compatible API.
+  # LLM review — Qwen3-Coder-Plus via opencode + the Bailian OpenAI-compatible API.
   # Independent job (no `needs:`): runs even when `static` fails.
   # ---------------------------------------------------------------------------
   opencode:
-    name: opencode review (Qwen3.6 Plus)
+    name: opencode review (Qwen3-Coder-Plus)
     runs-on: ubuntu-latest
     if: ${{ !github.event.pull_request.draft }}
     steps:
@@ -99,12 +99,14 @@ jobs:
           persist-credentials: false
 
       - name: Run opencode
-        uses: anomalyco/opencode/github@latest
+        # Pinned to an immutable commit (v1.16.2) instead of @latest — a mutable
+        # tag on a third-party action is a supply-chain risk.
+        uses: anomalyco/opencode/github@76c631d198f9ff620e15468e45f3457d50481b57 # v1.16.2
         env:
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          model: dashscope/qwen3.6-plus
+          model: dashscope/qwen3-coder-plus
           use_github_token: true
           share: "false"
           prompt: |

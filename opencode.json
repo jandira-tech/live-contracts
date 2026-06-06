@@ -9,8 +9,8 @@
         "apiKey": "{env:DASHSCOPE_API_KEY}"
       },
       "models": {
-        "qwen3.6-plus": {
-          "name": "Qwen3.6 Plus"
+        "qwen3-coder-plus": {
+          "name": "Qwen3-Coder-Plus"
         }
       }
     }
