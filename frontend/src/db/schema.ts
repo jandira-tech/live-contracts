@@ -1,4 +1,4 @@
-import { sqliteTable, text, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // Mirrors the SQLite ex10_exhibits table. filed_at is stored explicitly
 // (extracted from filing_metadata.filed_at at ingest) so it can be indexed.
@@ -23,6 +23,11 @@ export const exhibits = sqliteTable(
     filingMetadata: text('filing_metadata'),
     imageUrls: text('image_urls'),
     markdown: text('markdown'),
+    // Additive, nullable enrichment columns (PR1). Backward-compatible: existing
+    // rows / producers that don't send them default to NULL.
+    source: text('source'), // discovery channel, e.g. "rss" | "efts"
+    sizeBytes: integer('size_bytes'), // submission size in bytes (nullable)
+    detectedAt: text('detected_at'), // canonical RFC3339 UTC detection timestamp
   },
   (t) => ({
     // Matches the source SQLite UNIQUE(accession, doc_type, filename) exactly —
@@ -31,6 +36,7 @@ export const exhibits = sqliteTable(
     idxFiledAt: index('idx_ex_filed_at').on(t.filedAt),
     idxForm: index('idx_ex_form_type').on(t.formType),
     idxCik: index('idx_ex_cik').on(t.cik),
+    idxDetectedAt: index('idx_ex_detected_at').on(t.detectedAt),
   }),
 );
 

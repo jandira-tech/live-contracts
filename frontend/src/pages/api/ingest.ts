@@ -15,6 +15,7 @@ interface InRow {
   filename: string; description?: string; sequence?: string; filing_url?: string;
   found_at?: string; filed_at?: string; markdown_status?: string;
   filing_metadata?: string; image_urls?: string; markdown?: string;
+  source?: string; size_bytes?: number; detected_at?: string;
 }
 
 // UUIDv7: 48-bit big-endian unix-ms timestamp + 74 random bits, version/variant set.
@@ -44,6 +45,10 @@ const toInsert = (r: InRow): ExhibitInsert => ({
   sequence: r.sequence ?? null, filingUrl: r.filing_url ?? null, foundAt: r.found_at ?? null,
   filedAt: r.filed_at ?? null, markdownStatus: r.markdown_status ?? null,
   filingMetadata: r.filing_metadata ?? null, imageUrls: r.image_urls ?? null, markdown: r.markdown ?? null,
+  // Normalize blank/whitespace strings to null so they don't bypass the enrich-only
+  // coalesce and clobber a stored value with an empty string.
+  source: (r.source && r.source.trim()) || null, sizeBytes: r.size_bytes ?? null,
+  detectedAt: (r.detected_at && r.detected_at.trim()) || null,
 });
 
 // On (accession, doc_type, filename) conflict, refresh everything except the conflict key.
@@ -60,6 +65,9 @@ const CONFLICT_SET = {
   filingMetadata: sql`coalesce(excluded.filing_metadata, filing_metadata)`,
   imageUrls: sql`coalesce(excluded.image_urls, image_urls)`,
   markdown: sql`coalesce(excluded.markdown, markdown)`,
+  source: sql`coalesce(excluded.source, source)`,
+  sizeBytes: sql`coalesce(excluded.size_bytes, size_bytes)`,
+  detectedAt: sql`coalesce(excluded.detected_at, detected_at)`,
 };
 
 const j = (o: unknown, status: number) =>
@@ -81,14 +89,14 @@ export async function POST(context: APIContext): Promise<Response> {
   if (rows.length > 200) return j({ error: 'max 200 rows per batch' }, 400);
 
   const db = drizzle(e.DB, { schema });
-  // D1 caps bound parameters at 100/query → ≤6 rows/insert (15 cols * 6 = 90).
+  // D1 caps bound parameters at 100/query → ≤5 rows/insert (18 cols * 5 = 90).
   // Run the chunks in one atomic db.batch (fewer round-trips, no partial write).
   // Return the unique ids accepted (NOT accessions — accession isn't unique, so
   // the writer must mark mirrored by id to avoid dropping same-accession rows).
   const accepted: number[] = [];
   const stmts = [];
-  for (let i = 0; i < rows.length; i += 6) {
-    const chunk = rows.slice(i, i + 6);
+  for (let i = 0; i < rows.length; i += 5) {
+    const chunk = rows.slice(i, i + 5);
     stmts.push(
       db.insert(exhibits).values(chunk.map(toInsert))
         .onConflictDoUpdate({ target: [exhibits.accession, exhibits.docType, exhibits.filename], set: CONFLICT_SET }),
