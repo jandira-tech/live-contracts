@@ -44,3 +44,4 @@ deploy/hf-space/seed.db
 
 # Unrelated embedded clone (not part of this repo)
 secinfra-rust/
+.staging_sec_api_key
