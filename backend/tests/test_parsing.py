@@ -1,5 +1,22 @@
 """Tests for pure RSS parsing and EX-10 classification logic."""
-from sec_listener.parsing import classify_documents, parse_rss_feed
+import pytest
+
+from sec_listener.parsing import (
+    classify_documents,
+    filing_txt_url,
+    parse_rss_feed,
+    parse_summary_size_bytes,
+)
+
+
+def test_filing_txt_url_uses_modern_accession_folder():
+    # Modern/canonical EDGAR path includes the accession-number folder (no dashes),
+    # matching the Rust producer and the D1 schema.
+    url = filing_txt_url("719413", "0001437749-26-018228")
+    assert url == (
+        "https://www.sec.gov/Archives/edgar/data/719413/"
+        "000143774926018228/0001437749-26-018228.txt"
+    )
 
 SAMPLE_FEED = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
@@ -37,6 +54,70 @@ def test_parse_rss_feed_handles_empty_feed():
 def test_parse_rss_feed_returns_empty_on_garbage():
     # Robustness: invalid XML must not raise.
     assert parse_rss_feed("not xml at all <<<") == []
+
+
+@pytest.mark.parametrize(
+    "summary, expected",
+    [
+        ("<b>Filed:</b> 2026-05-22 <b>Size:</b> 4 KB", 4 * 1024),
+        ("<b>Filed:</b> 2026-05-22 <b>Size:</b> 21 MB", 21 * 1024 * 1024),
+        ("<b>Filed:</b> 2026-05-22 <b>Size:</b> 2 GB", 2 * 1024 * 1024 * 1024),
+        ("<b>Filed:</b> 2026-05-22 <b>Size:</b> 512 B", 512),
+        ("no size here", None),
+    ],
+)
+def test_parse_summary_size_bytes(summary, expected):
+    # Mirrors the Rust producer's parse_summary_size_bytes (1 KB = 1024 bytes).
+    assert parse_summary_size_bytes(summary) == expected
+
+
+@pytest.mark.parametrize(
+    "summary, expected",
+    [
+        # Fractional values are floored to whole bytes.
+        ("<b>Size:</b> 1.5 MB", int(1.5 * 1024 * 1024)),
+        ("<b>Size:</b> 0.5 KB", int(0.5 * 1024)),
+        # Mixed / lowercase units must be matched case-insensitively.
+        ("<b>Size:</b> 10 kb", 10 * 1024),
+        ("<b>Size:</b> 3 Mb", 3 * 1024 * 1024),
+        ("<b>Size:</b> 1 gB", 1 * 1024 * 1024 * 1024),
+        # Unknown units -> None.
+        ("<b>Size:</b> 5 TB", None),
+        ("<b>Size:</b> 5 XX", None),
+        # Negative magnitude -> None.
+        ("<b>Size:</b> -10 KB", None),
+        # Malformed numeric token -> None.
+        ("<b>Size:</b> not-a-number KB", None),
+        # Non-finite (huge value overflows float to inf) must not raise -> None.
+        ("<b>Size:</b> " + "9" * 400 + " GB", None),
+    ],
+)
+def test_parse_summary_size_bytes_edge_cases(summary, expected):
+    assert parse_summary_size_bytes(summary) == expected
+
+
+def test_parse_rss_feed_carries_size_bytes():
+    feed = (
+        '<feed xmlns="http://www.w3.org/2005/Atom">'
+        "<entry>"
+        "<title>8-K - EXAMPLE CORP</title>"
+        '<link rel="alternate" type="text/html" '
+        'href="https://www.sec.gov/Archives/edgar/data/719413/'
+        '000143774926018228-index.htm"/>'
+        '<category term="8-K"/>'
+        '<summary type="html">&lt;b&gt;Filed:&lt;/b&gt; 2026-05-25 '
+        "&lt;b&gt;AccNo:&lt;/b&gt; 0001437749-26-018228 "
+        "&lt;b&gt;Size:&lt;/b&gt; 21 MB&lt;/summary&gt;</summary>"
+        "</entry>"
+        "</feed>"
+    )
+    f = parse_rss_feed(feed)[0]
+    assert f["size_bytes"] == 21 * 1024 * 1024
+
+
+def test_parse_rss_feed_size_bytes_none_when_absent():
+    f = parse_rss_feed(SAMPLE_FEED)[0]  # SAMPLE_FEED has no Size: marker
+    assert f["size_bytes"] is None
 
 
 def test_classify_documents_separates_traditional_ex10_from_xbrl():

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 import xml.etree.ElementTree as ET
 
@@ -11,6 +12,59 @@ _ATOM = {"atom": "http://www.w3.org/2005/Atom"}
 _ACCESSION_RE = re.compile(r"/(\d{10})-?(\d{2})-?(\d{6})")
 _CIK_RE = re.compile(r"/data/(\d+)/")
 _FILED_RE = re.compile(r"Filed:</b>\s*(\d{4}-\d{2}-\d{2})")
+_SIZE_RE = re.compile(r"Size:</b>\s*([0-9.]+)\s*([A-Za-z]+)?")
+
+# Binary unit multipliers (1 KB = 1024 bytes) — mirrors the Rust producer.
+_SIZE_UNITS = {
+    "B": 1,
+    "BYTE": 1,
+    "BYTES": 1,
+    "KB": 1024,
+    "K": 1024,
+    "MB": 1024 * 1024,
+    "M": 1024 * 1024,
+    "GB": 1024 * 1024 * 1024,
+    "G": 1024 * 1024 * 1024,
+}
+
+
+def filing_txt_url(cik: str, accession: str) -> str:
+    """Build the modern/canonical EDGAR full-submission .txt URL.
+
+    The path includes the accession-number folder (digits only), matching the
+    Rust producer and the D1 schema::
+
+        https://www.sec.gov/Archives/edgar/data/{cik}/{accession_nodash}/{accession}.txt
+    """
+    nodash = accession.replace("-", "")
+    return f"https://www.sec.gov/Archives/edgar/data/{cik}/{nodash}/{accession}.txt"
+
+
+def parse_summary_size_bytes(summary: str) -> int | None:
+    """Parse the ``<b>Size:</b> N UNIT`` token from a SEC RSS summary into bytes.
+
+    Mirrors the Rust producer's parser (1 KB = 1024 bytes). Returns ``None`` when
+    no size marker is present or the value/unit is unrecognised.
+    """
+    m = _SIZE_RE.search(summary or "")
+    if not m:
+        return None
+    try:
+        value = float(m.group(1))
+    except (TypeError, ValueError):
+        return None
+    # Reject NaN and ±inf (e.g. an absurdly long digit run overflows float to inf):
+    # round() on a non-finite raises OverflowError/ValueError, so guard up front.
+    if not math.isfinite(value) or value < 0:
+        return None
+    unit = (m.group(2) or "B").upper()
+    multiplier = _SIZE_UNITS.get(unit)
+    if multiplier is None:
+        return None
+    try:
+        return round(value * multiplier)
+    except (OverflowError, ValueError):
+        return None
 
 
 def parse_rss_feed(rss_content: str) -> list[dict]:
@@ -56,6 +110,7 @@ def parse_rss_feed(rss_content: str) -> list[dict]:
                     "filing_date": filing_date,
                     "url": url,
                     "summary": summary_text,
+                    "size_bytes": parse_summary_size_bytes(summary_text),
                 }
             )
         except Exception as exc:  # noqa: BLE001 - one bad entry must not stop the feed

@@ -31,5 +31,25 @@
   "routes": [
     { "pattern": "live-contracts.arthur.law", "custom_domain": true }
   ],
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+
+  // Staging: an isolated copy of the frontend on a *.workers.dev URL (no custom
+  // domain), backed by its own D1 (`sec-ex10-staging`) and SESSION KV. Used to
+  // receive ingest from the Rust backend (`backend-rust`) via /api/ingest so the
+  // Rust pipeline can be exercised without touching the Python-fed prod `sec-ex10`
+  // DB. Bindings are NOT inherited from the top level, so DB/SESSION are
+  // redeclared here pointing at the staging resources. Deploy: `wrangler deploy
+  // --env staging`; secret: `wrangler secret put SEC_API_KEY --env staging`.
+  "env": {
+    "staging": {
+      "name": "sec-ex10-frontend-staging",
+      "kv_namespaces": [
+        { "binding": "SESSION", "id": "b82f3dc113814af999838c4f1892e58a" }
+      ],
+      "d1_databases": [
+        { "binding": "DB", "database_name": "sec-ex10-staging", "database_id": "2d70ff84-8abc-457c-b483-656194217fd2" }
+      ],
+      "observability": { "enabled": true }
+    }
+  }
 }

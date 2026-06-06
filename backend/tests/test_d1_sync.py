@@ -22,6 +22,20 @@ def test_to_ingest_record_extracts_filed_at(db):
     assert rec["filed_at"] == "20260501120000" and rec["accession"] == "a" and rec["markdown"] == "body"
 
 
+def test_to_ingest_record_forwards_source_size_bytes_detected_at(db):
+    db.save_ex10_exhibit(
+        {"accession": "p", "cik": "1", "form_type": "8-K", "doc_type": "EX-10.1",
+         "filename": "p.htm", "description": "", "sequence": "1", "url": "u",
+         "source": "rss", "size_bytes": 8192, "detected_at": "2026-06-06T12:00:00+00:00"},
+        markdown="body", filing_metadata={"filed_at": "20260501120000"})
+    row = [r for r in db.recent_ex10() if r["accession"] == "p"][0]
+    db.update_image_urls(row["id"], [])
+    rec = to_ingest_record(db.finalized_unmirrored()[0])
+    assert rec["source"] == "rss"
+    assert rec["size_bytes"] == 8192
+    assert rec["detected_at"] == "2026-06-06T12:00:00+00:00"
+
+
 def test_push_finalized_posts_and_marks(db):
     _finalize(db, "a"); _finalize(db, "b")
     posted = []

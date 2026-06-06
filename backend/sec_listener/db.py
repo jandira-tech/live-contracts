@@ -60,6 +60,9 @@ class Database:
                     sequence TEXT,
                     filing_url TEXT,
                     found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    source TEXT,
+                    size_bytes INTEGER,
+                    detected_at TEXT,
                     UNIQUE(accession, doc_type, filename)
                 );
                 CREATE TABLE IF NOT EXISTS all_exhibits (
@@ -82,6 +85,11 @@ class Database:
             self._ensure_column(conn, "ex10_exhibits", "image_urls", "TEXT")
             self._ensure_column(conn, "ex10_exhibits", "mirrored", "INTEGER DEFAULT 0")
             self._ensure_column(conn, "ex10_exhibits", "image_attempts", "INTEGER DEFAULT 0")
+            # Producer-parity columns (Rust producer + D1 schema): discovery channel,
+            # submission size, and the precise RFC3339 detection timestamp. Nullable.
+            self._ensure_column(conn, "ex10_exhibits", "source", "TEXT")
+            self._ensure_column(conn, "ex10_exhibits", "size_bytes", "INTEGER")
+            self._ensure_column(conn, "ex10_exhibits", "detected_at", "TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ex10_found_at ON ex10_exhibits(found_at)"
             )
@@ -111,13 +119,18 @@ class Database:
         # from "processed, but headerless" ({} -> '{}', a terminal state). Using a
         # falsy check would collapse {} to NULL and re-queue it forever.
         meta_json = json.dumps(filing_metadata) if filing_metadata is not None else None
+        # found_at: the producer supplies the UTC display timestamp; fall back to the
+        # SQLite CURRENT_TIMESTAMP default (also UTC) when absent (e.g. legacy callers).
+        found_at = exhibit.get("found_at")
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO ex10_exhibits
                 (accession, cik, form_type, doc_type, filename, description,
-                 sequence, filing_url, markdown, markdown_status, filing_metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 sequence, filing_url, markdown, markdown_status, filing_metadata,
+                 source, size_bytes, detected_at, found_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        COALESCE(?, CURRENT_TIMESTAMP))
                 """,
                 (
                     exhibit.get("accession"),
@@ -131,6 +144,10 @@ class Database:
                     markdown,
                     status,
                     meta_json,
+                    exhibit.get("source"),
+                    exhibit.get("size_bytes"),
+                    exhibit.get("detected_at"),
+                    found_at,
                 ),
             )
             conn.commit()
@@ -265,7 +282,7 @@ class Database:
         with self.connect() as conn:
             rows = conn.execute(
                 f"""SELECT id, accession, cik, form_type, doc_type, filename, description,
-                          sequence, filing_url, found_at,
+                          sequence, filing_url, found_at, source, size_bytes, detected_at,
                           json_extract(filing_metadata, '$.filed_at') AS filed_at,
                           markdown_status, filing_metadata, image_urls, markdown
                    FROM ex10_exhibits

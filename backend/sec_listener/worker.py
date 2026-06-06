@@ -151,18 +151,20 @@ class BackfillWorker:
     def _datamule_metadata_fetcher(self, accession: str, cik: str) -> dict:
         from datamule import Submission, format_accession
 
-        from .parsing import extract_filing_header
+        from .parsing import extract_filing_header, filing_txt_url
 
         formatted = format_accession(accession.replace("-", ""), "dash")
-        url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{formatted}.txt"
+        url = filing_txt_url(cik, formatted)
         sub = Submission(url=url)
         return extract_filing_header(sub.metadata.content)
 
     def _datamule_fetcher(self, accession: str, cik: str, filename: str) -> str:
         from datamule import Submission, format_accession
 
+        from .parsing import filing_txt_url
+
         formatted = format_accession(accession.replace("-", ""), "dash")
-        url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{formatted}.txt"
+        url = filing_txt_url(cik, formatted)
         sub = Submission(url=url)
         docs = sub.metadata.content.get("documents", [])
         target = next((d for d in docs if d.get("filename") == filename), None)

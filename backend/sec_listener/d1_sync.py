@@ -7,7 +7,8 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 _FIELDS = ["id","accession","cik","form_type","doc_type","filename","description","sequence",
-           "filing_url","found_at","filed_at","markdown_status","filing_metadata","image_urls","markdown"]
+           "filing_url","found_at","filed_at","markdown_status","filing_metadata","image_urls","markdown",
+           "source","size_bytes","detected_at"]
 
 
 def to_ingest_record(row: dict[str, Any]) -> dict[str, Any]:
