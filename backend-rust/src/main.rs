@@ -23,10 +23,12 @@ async fn run(cfg: Config, state: HealthState) {
     // Mimic datamule: RSS (fast, lossy) + EFTS (slower, sweeps up RSS's misses).
     // Both default on via Config; either can be disabled with SEC_USE_RSS /
     // SEC_USE_EFTS. secinfra::Monitor::build() panics if neither is enabled.
+    // Cache dedups accessions seen across RSS + EFTS so each filing emits once.
     let monitor = secinfra::Monitor::new()
         .polling_interval_ms(cfg.poll_interval_ms)
         .use_rss(cfg.use_rss)
         .use_efts(cfg.use_efts)
+        .with_cache(secinfra::AccessionCache::new(cfg.accession_cache_size))
         .build();
 
     let mut id_counter: u64 = 0u64;
