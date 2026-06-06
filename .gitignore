@@ -41,3 +41,11 @@ deploy/hf-space/seed.db
 
 # Local data snapshots (parquet mirror / exports)
 *.parquet
+
+# Local-only staging ingest key (never commit secrets)
+.staging_sec_api_key
+
+# Stray embedded clones / agent worktrees (must not be tracked as gitlinks)
+secinfra-rust/
+secinfra-rust
+.claude/worktrees/
