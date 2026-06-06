@@ -20,6 +20,9 @@ pub struct Config {
     /// runs the stateful "Python-parity" mode (store + backfill + push + query
     /// API); when unset (default) it stays the lean stateless inline-POST producer.
     pub store_path: Option<String>,
+    /// LRU capacity for the cross-feed accession dedup cache.
+    /// Sized via SEC_ACCESSION_CACHE_SIZE; invalid values fall back to the default.
+    pub accession_cache_size: usize,
 }
 
 impl Config {
@@ -73,6 +76,10 @@ impl Config {
             use_rss: flag("SEC_USE_RSS"),
             use_efts: flag("SEC_USE_EFTS"),
             store_path: get("SEC_STORE_PATH").filter(|s| !s.is_empty()),
+            accession_cache_size: get("SEC_ACCESSION_CACHE_SIZE")
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(65536),
         }
     }
 }
@@ -188,5 +195,35 @@ mod tests {
         let defaults = map(&[("SEC_API_KEY", "k")]);
         let cfg = Config::from_map(|k| defaults.get(k).cloned());
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn accession_cache_size_defaults_to_65536() {
+        let m = map(&[("SEC_API_KEY", "k")]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.accession_cache_size, 65536);
+    }
+
+    #[test]
+    fn accession_cache_size_reads_env_override() {
+        let m = map(&[("SEC_API_KEY", "k"), ("SEC_ACCESSION_CACHE_SIZE", "131072")]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.accession_cache_size, 131072);
+    }
+
+    #[test]
+    fn accession_cache_size_invalid_env_falls_back_to_default() {
+        let m = map(&[("SEC_API_KEY", "k"), ("SEC_ACCESSION_CACHE_SIZE", "not-a-number")]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.accession_cache_size, 65536);
+    }
+
+    #[test]
+    fn accession_cache_size_zero_falls_back_to_default() {
+        // 0 disables the cache's filter_new() (monitor would emit nothing) and can
+        // panic capacity-based caches; treat it as invalid and use the default.
+        let m = map(&[("SEC_API_KEY", "k"), ("SEC_ACCESSION_CACHE_SIZE", "0")]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.accession_cache_size, 65536);
     }
 }
