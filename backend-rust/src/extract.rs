@@ -11,10 +11,20 @@ pub struct Ex10Doc {
     pub content: Vec<u8>,
 }
 
-/// EX-10 exhibits + GRAPHIC (image) documents from one parsed filing.
+/// Metadata-only record of a non-EX-10 document (for the all_exhibits table).
+pub struct DocMeta {
+    pub doc_type: String,
+    pub filename: String,
+    pub description: String,
+    pub sequence: String,
+}
+
+/// EX-10 exhibits + GRAPHIC (image) documents from one parsed filing, plus the
+/// metadata of every non-EX-10 document (`others`) for all_exhibits parity.
 pub struct Gathered {
     pub ex10: Vec<Ex10Doc>,
     pub graphics: Vec<(String, Vec<u8>)>,
+    pub others: Vec<DocMeta>,
 }
 
 fn s(bytes: &[u8]) -> String {
@@ -25,6 +35,7 @@ fn s(bytes: &[u8]) -> String {
 pub fn gather(parsed: &ParsedSgml) -> Gathered {
     let mut ex10 = Vec::new();
     let mut graphics = Vec::new();
+    let mut others = Vec::new();
     for d in parsed.documents() {
         let dt = s(d.doc_type());
         if is_traditional_ex10(&dt) {
@@ -35,14 +46,21 @@ pub fn gather(parsed: &ParsedSgml) -> Gathered {
                 sequence: s(d.sequence()),
                 content: d.content().to_vec(),
             });
-        } else if dt == "GRAPHIC" {
-            let fname = s(d.filename());
-            if !fname.is_empty() {
-                graphics.push((fname, d.content().to_vec()));
-            }
+            continue;
+        }
+        // Every non-EX-10 document → all_exhibits metadata (mirrors Python's split).
+        let filename = s(d.filename());
+        others.push(DocMeta {
+            doc_type: dt.clone(),
+            filename: filename.clone(),
+            description: s(d.description()),
+            sequence: s(d.sequence()),
+        });
+        if dt == "GRAPHIC" && !filename.is_empty() {
+            graphics.push((filename, d.content().to_vec()));
         }
     }
-    Gathered { ex10, graphics }
+    Gathered { ex10, graphics, others }
 }
 
 /// Bridge standardized submission metadata into header::Event list.
@@ -64,14 +82,58 @@ pub fn header_events(meta: &ParsedSubmissionMetadata) -> Vec<Event> {
 }
 
 /// Download a filing's full SGML submission (.txt) bytes.
+/// Max fetch attempts before giving up on a submission (1 try + 4 retries).
+const FETCH_MAX_ATTEMPTS: u32 = 5;
+
+/// Backoff before the next retry: exponential (0.5s→16s, capped at 30s) plus a
+/// small per-accession jitter so concurrent retriers don't resync onto SEC at
+/// the same instant.
+fn fetch_backoff(attempt: u32, accession: u64) -> std::time::Duration {
+    let base_ms = 500u64.saturating_mul(1u64 << (attempt - 1).min(5));
+    std::time::Duration::from_millis(base_ms.min(30_000) + accession % 500)
+}
+
+/// Honor a server-provided `Retry-After: <seconds>` if present.
+fn retry_after(resp: &reqwest::Response) -> Option<std::time::Duration> {
+    resp.headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(std::time::Duration::from_secs)
+}
+
 pub async fn fetch_sgml(
     client: &reqwest::Client,
     accession: u64,
     cik: u64,
 ) -> anyhow::Result<Vec<u8>> {
     let url = secinfra::construct_sgml_url(accession, cik);
-    let resp = client.get(&url).send().await?.error_for_status()?;
-    Ok(resp.bytes().await?.to_vec())
+    let mut attempt = 0u32;
+    loop {
+        let resp = client.get(&url).send().await?;
+        let status = resp.status();
+        // SEC throttles concurrent clients with 429 (and the odd transient 5xx).
+        // Back off and retry rather than dropping the filing or hammering SEC —
+        // this is what keeps the concurrent producer under the 10 req/s ceiling.
+        if status.as_u16() == 429 || status.is_server_error() {
+            attempt += 1;
+            if attempt >= FETCH_MAX_ATTEMPTS {
+                anyhow::bail!("{url} returned {status} after {attempt} attempts");
+            }
+            let wait = retry_after(&resp).unwrap_or_else(|| fetch_backoff(attempt, accession));
+            tracing::warn!(
+                "{url} -> {status}; retry {attempt}/{FETCH_MAX_ATTEMPTS} after {:.1}s",
+                wait.as_secs_f64()
+            );
+            tokio::time::sleep(wait).await;
+            continue;
+        }
+        let resp = resp.error_for_status()?;
+        return Ok(resp.bytes().await?.to_vec());
+    }
 }
 
 /// The canonical filing URL stored in `filing_url` (same .txt URL).
@@ -82,6 +144,19 @@ pub fn filing_url(accession: u64, cik: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fetch_backoff_grows_then_caps() {
+        use std::time::Duration;
+        let acc = 7u64;
+        // First retry waits at least the 0.5s base; delays grow with attempts.
+        assert!(fetch_backoff(1, acc) >= Duration::from_millis(500));
+        assert!(fetch_backoff(3, acc) > fetch_backoff(1, acc));
+        // Capped at 30s (+ <500ms jitter) so a long outage can't stall a worker.
+        assert!(fetch_backoff(40, acc) <= Duration::from_millis(30_500));
+        // Jitter is bounded and per-accession (keeps concurrent retriers apart).
+        assert!(fetch_backoff(1, 0) < fetch_backoff(1, 499) || fetch_backoff(1, 0) <= fetch_backoff(1, 1));
+    }
 
     #[test]
     fn gathers_ex10_and_graphic() {
@@ -97,6 +172,10 @@ mod tests {
         assert_eq!(g.graphics.len(), 1);
         assert_eq!(g.graphics[0].0, "img1.jpg");
         assert!(!g.graphics[0].1.is_empty());
+        // every non-EX-10 document is also recorded (metadata only) for all_exhibits
+        assert_eq!(g.others.len(), 1);
+        assert_eq!(g.others[0].doc_type, "GRAPHIC");
+        assert_eq!(g.others[0].filename, "img1.jpg");
     }
 
     #[test]

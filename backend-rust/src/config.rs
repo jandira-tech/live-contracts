@@ -8,8 +8,12 @@ pub struct Config {
     pub hf_token: Option<String>,
     pub image_repo: String,
     pub poll_interval_ms: u64,
+    /// Max SEC document fetches per second (SEC caps clients at 10/s). Default 8
+    /// leaves margin; the pipeline throttles fetch_sgml to this rate.
+    pub max_rps: u64,
     pub push_batch: usize,
-    /// Max submissions processed concurrently per monitor batch. Floored to 1.
+    /// Max submissions processed concurrently per monitor batch. Floored to 1,
+    /// capped at 50 (SEC rate-limit / resource-exhaustion guard).
     pub concurrency: usize,
     pub port: u16,
     pub convert_markdown: bool,
@@ -18,6 +22,16 @@ pub struct Config {
     /// filings RSS drops). Both default on; secinfra::Monitor requires ≥1 true.
     pub use_rss: bool,
     pub use_efts: bool,
+    /// Optional outbound proxy (SEC_PROXY) for SEC fetches — e.g. to spread load
+    /// across IPs and avoid 429s when running the concurrent producer hot.
+    pub proxy: Option<String>,
+    /// Opt-in local SQLite store path (SEC_STORE_PATH). When set, the producer
+    /// runs the stateful "Python-parity" mode (store + backfill + push + query
+    /// API); when unset (default) it stays the lean stateless inline-POST producer.
+    pub store_path: Option<String>,
+    /// LRU capacity for the cross-feed accession dedup cache.
+    /// Sized via SEC_ACCESSION_CACHE_SIZE; invalid values fall back to the default.
+    pub accession_cache_size: usize,
 }
 
 impl Config {
@@ -48,10 +62,12 @@ impl Config {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(100)
             .min(200);
+        // Floor 1 (buffer_unordered(0) stalls), cap 50 (rate-limit / resource
+        // guard). clamp(1, 50) == .max(1).min(50); clippy prefers clamp.
         let concurrency = get("SEC_CONCURRENCY")
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(8)
-            .max(1);
+            .clamp(1, 50);
         // One place for boolean-like env parsing ("false"/"0" → false, default true).
         let flag = |key: &str| get(key).map(|v| v != "false" && v != "0").unwrap_or(true);
         let convert_markdown = flag("SEC_CONVERT_MARKDOWN");
@@ -67,6 +83,10 @@ impl Config {
             poll_interval_ms: get("SEC_POLL_INTERVAL_MS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(200),
+            max_rps: get("SEC_MAX_RPS")
+                .and_then(|v| v.parse().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(8),
             push_batch,
             concurrency,
             port: get("PORT")
@@ -75,6 +95,12 @@ impl Config {
             convert_markdown,
             use_rss: flag("SEC_USE_RSS"),
             use_efts: flag("SEC_USE_EFTS"),
+            proxy: get("SEC_PROXY").filter(|s| !s.is_empty()),
+            store_path: get("SEC_STORE_PATH").filter(|s| !s.is_empty()),
+            accession_cache_size: get("SEC_ACCESSION_CACHE_SIZE")
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(65536),
         }
     }
 }
@@ -95,6 +121,7 @@ mod tests {
         assert_eq!(cfg.ingest_url, "https://live-contracts.arthur.law/api/ingest");
         assert_eq!(cfg.image_repo, "arthrod/sec-ex10-exhibits");
         assert_eq!(cfg.poll_interval_ms, 200);
+        assert_eq!(cfg.max_rps, 8); // SEC-courtesy default, under the 10/s cap
         assert_eq!(cfg.push_batch, 100);
         assert_eq!(cfg.concurrency, 8);
         assert_eq!(cfg.port, 7860);
@@ -104,6 +131,22 @@ mod tests {
         // EFTS as the accuracy backstop for the filings the RSS feed drops.
         assert!(cfg.use_rss);
         assert!(cfg.use_efts);
+        // Stateless by default — no local store.
+        assert!(cfg.store_path.is_none());
+    }
+
+    #[test]
+    fn store_path_enables_stateful_mode() {
+        let off = map(&[("SEC_API_KEY", "k")]);
+        assert!(Config::from_map(|k| off.get(k).cloned()).store_path.is_none());
+        // empty string is treated as unset
+        let empty = map(&[("SEC_API_KEY", "k"), ("SEC_STORE_PATH", "")]);
+        assert!(Config::from_map(|k| empty.get(k).cloned()).store_path.is_none());
+        let on = map(&[("SEC_API_KEY", "k"), ("SEC_STORE_PATH", "/data/sec.db")]);
+        assert_eq!(
+            Config::from_map(|k| on.get(k).cloned()).store_path.as_deref(),
+            Some("/data/sec.db")
+        );
     }
 
     #[test]
@@ -122,6 +165,7 @@ mod tests {
         assert_eq!(cfg.ingest_url, "https://example.com/api/ingest"); // D1_INGEST_URL, not SEC_INGEST_URL
         assert_eq!(cfg.push_batch, 200); // capped at 200
         assert_eq!(cfg.port, 9090);
+        assert_eq!(cfg.max_rps, 8); // 0/invalid ignored → default
         assert!(!cfg.convert_markdown);
         assert_eq!(cfg.hf_token.as_deref(), Some("hf_x"));
         // Either source can be disabled via env ("false"/"0"); build() still
@@ -145,6 +189,14 @@ mod tests {
         let bad = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "abc")]);
         let cfg = Config::from_map(|k| bad.get(k).cloned());
         assert_eq!(cfg.concurrency, 8);
+    }
+
+    #[test]
+    fn concurrency_is_capped_at_50() {
+        // Cap to avoid SEC rate-limit / resource exhaustion under huge env values.
+        let huge = map(&[("SEC_API_KEY", "k"), ("SEC_CONCURRENCY", "100")]);
+        let cfg = Config::from_map(|k| huge.get(k).cloned());
+        assert_eq!(cfg.concurrency, 50);
     }
 
     #[test]
@@ -192,5 +244,35 @@ mod tests {
         let defaults = map(&[("SEC_API_KEY", "k")]);
         let cfg = Config::from_map(|k| defaults.get(k).cloned());
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn accession_cache_size_defaults_to_65536() {
+        let m = map(&[("SEC_API_KEY", "k")]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.accession_cache_size, 65536);
+    }
+
+    #[test]
+    fn accession_cache_size_reads_env_override() {
+        let m = map(&[("SEC_API_KEY", "k"), ("SEC_ACCESSION_CACHE_SIZE", "131072")]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.accession_cache_size, 131072);
+    }
+
+    #[test]
+    fn accession_cache_size_invalid_env_falls_back_to_default() {
+        let m = map(&[("SEC_API_KEY", "k"), ("SEC_ACCESSION_CACHE_SIZE", "not-a-number")]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.accession_cache_size, 65536);
+    }
+
+    #[test]
+    fn accession_cache_size_zero_falls_back_to_default() {
+        // 0 disables the cache's filter_new() (monitor would emit nothing) and can
+        // panic capacity-based caches; treat it as invalid and use the default.
+        let m = map(&[("SEC_API_KEY", "k"), ("SEC_ACCESSION_CACHE_SIZE", "0")]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.accession_cache_size, 65536);
     }
 }
