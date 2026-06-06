@@ -45,7 +45,7 @@ async fn run(cfg: Config, state: HealthState) {
         for sub in batch {
             let accession = sub.accession;
             let form = sub.submission_type.clone();
-            tracing::debug!("processing {accession} ({form})");
+            tracing::debug!(size_bytes = ?sub.size_bytes, "processing {accession} ({form})");
 
             let records = pipeline::process_submission(&client, &cfg, &mut id_counter, &sub).await;
             if records.is_empty() {
