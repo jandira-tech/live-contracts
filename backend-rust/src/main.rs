@@ -69,17 +69,25 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
             if let Some(store) = &store {
                 // Stateful mode: persist to the local store (like the Python
                 // worker); the D1 push happens from the store in a later PR.
-                if let Err(e) = store.mark_seen(&p.accession, &p.form_type, &p.cik) {
-                    tracing::warn!("store mark_seen failed for {}: {e}", p.accession);
-                }
+                // Mark the accession seen only AFTER its rows land — otherwise a
+                // failed insert leaves it recorded as seen and backfill/resume
+                // would skip it, silently dropping that filing's exhibits.
+                let mut writes_ok = true;
                 for r in &p.ex10 {
                     if let Err(e) = store.upsert_ex10(r) {
                         tracing::warn!("store upsert_ex10 failed for {}: {e}", p.accession);
+                        writes_ok = false;
                     }
                 }
                 for r in &p.others {
                     if let Err(e) = store.insert_all_exhibit(r) {
                         tracing::warn!("store insert_all_exhibit failed for {}: {e}", p.accession);
+                        writes_ok = false;
+                    }
+                }
+                if writes_ok {
+                    if let Err(e) = store.mark_seen(&p.accession, &p.form_type, &p.cik) {
+                        tracing::warn!("store mark_seen failed for {}: {e}", p.accession);
                     }
                 }
                 if !p.ex10.is_empty() {
