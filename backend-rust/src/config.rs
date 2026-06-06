@@ -73,6 +73,7 @@ impl Config {
             use_efts: flag("SEC_USE_EFTS"),
             accession_cache_size: get("SEC_ACCESSION_CACHE_SIZE")
                 .and_then(|v| v.parse::<usize>().ok())
+                .filter(|&n| n > 0)
                 .unwrap_or(65536),
         }
     }
@@ -192,6 +193,15 @@ mod tests {
     #[test]
     fn accession_cache_size_invalid_env_falls_back_to_default() {
         let m = map(&[("SEC_API_KEY", "k"), ("SEC_ACCESSION_CACHE_SIZE", "not-a-number")]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.accession_cache_size, 65536);
+    }
+
+    #[test]
+    fn accession_cache_size_zero_falls_back_to_default() {
+        // 0 disables the cache's filter_new() (monitor would emit nothing) and can
+        // panic capacity-based caches; treat it as invalid and use the default.
+        let m = map(&[("SEC_API_KEY", "k"), ("SEC_ACCESSION_CACHE_SIZE", "0")]);
         let cfg = Config::from_map(|k| m.get(k).cloned());
         assert_eq!(cfg.accession_cache_size, 65536);
     }
