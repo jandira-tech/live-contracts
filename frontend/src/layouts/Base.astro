@@ -71,5 +71,45 @@ const isSearch = path.startsWith('/search');
         </div>
       </div>
     </footer>
+    <script is:inline>
+      // WebMCP (experimental) — expose read-only contract tools to in-browser
+      // agents. Feature-detected; reuses the same /mcp endpoint as the remote
+      // MCP server, so tool behaviour stays in one place. No-ops where unsupported.
+      (function () {
+        var mc = navigator.modelContext;
+        if (!mc || typeof mc.provideContext !== 'function') return;
+        async function callMcp(name, args) {
+          try {
+            var r = await fetch('/mcp', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: name, arguments: args || {} } }),
+            });
+            var j = await r.json();
+            return (j && j.result) || { content: [{ type: 'text', text: 'Request failed.' }] };
+          } catch (e) {
+            return { content: [{ type: 'text', text: 'Request failed.' }] };
+          }
+        }
+        try {
+          mc.provideContext({
+            tools: [
+              {
+                name: 'search_contracts',
+                description: 'Search SEC EX-10 material contracts by keyword (parties, clauses, terms).',
+                inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'integer' } }, required: ['query'] },
+                execute: function (args) { return callMcp('search_agreements', args); },
+              },
+              {
+                name: 'recent_contracts',
+                description: 'List the most recently filed EX-10 material contracts.',
+                inputSchema: { type: 'object', properties: { limit: { type: 'integer' } } },
+                execute: function (args) { return callMcp('list_recent_agreements', args); },
+              },
+            ],
+          });
+        } catch (e) { /* experimental API shape mismatch — ignore */ }
+      })();
+    </script>
   </body>
 </html>
