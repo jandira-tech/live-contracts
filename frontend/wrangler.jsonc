@@ -42,6 +42,11 @@
     "head_sampling_rate": 1,
     "logs": { "invocation_logs": true, "head_sampling_rate": 1 }
   },
+  // GA Workers rate limiting — gates the public /mcp endpoint per client IP
+  // (60 requests / 60s). period must be 10 or 60.
+  "ratelimits": [
+    { "name": "MCP_RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }
+  ],
 
   // Staging: an isolated copy of the frontend on a *.workers.dev URL (no custom
   // domain), backed by its own D1 (`sec-ex10-staging`) and SESSION KV. Used to
@@ -63,7 +68,10 @@
         "enabled": true,
         "head_sampling_rate": 1,
         "logs": { "invocation_logs": true, "head_sampling_rate": 1 }
-      }
+      },
+      "ratelimits": [
+        { "name": "MCP_RATE_LIMITER", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } }
+      ]
     }
   }
 }
