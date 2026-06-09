@@ -1,0 +1,59 @@
+# robots.txt — live-contracts.arthur.law
+# Public, real-time feed of SEC EX-10 material-contract exhibits (public-domain
+# SEC EDGAR data). Policy: fully permissive — we WANT search engines and AI
+# agents to discover and use this content. Only the write-only ingest API is
+# excluded from crawling.
+
+User-agent: *
+Allow: /
+Disallow: /api/
+# Content Signals (contentsignals.org / draft-romm-aipref-contentsignals):
+# usage preferences for this content. All permitted.
+Content-Signal: search=yes, ai-input=yes, ai-train=yes
+
+# ---- Explicit AI crawler entries (all allowed, matching the permissive policy) ----
+# Search / answer engines
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+# Training / dataset crawlers (explicitly allowed)
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+Sitemap: https://live-contracts.arthur.law/sitemap.xml
