@@ -1,0 +1,6 @@
+# Cloudflare Workers static-assets headers.
+# The API catalog has no file extension to infer a type from, so set the
+# RFC 9727 / RFC 9264 media type explicitly.
+/.well-known/api-catalog
+  Content-Type: application/linkset+json
+  Cache-Control: public, max-age=86400
