@@ -31,7 +31,17 @@
   "routes": [
     { "pattern": "live-contracts.arthur.law", "custom_domain": true }
   ],
-  "observability": { "enabled": true },
+  // Workers Logs ON — the channel that surfaces request/error logs.
+  // Tracing: the wrangler CLI (4.98.0) does NOT yet accept an
+  // `observability.tracing` key (it warns "Unexpected fields" and drops it), even
+  // though the Cloudflare changelog documents it. Enable Workers tracing from the
+  // dashboard instead: Workers & Pages → sec-ex10-frontend → Observability.
+  // (`traces`/`persist` from the dashboard JSON are not wrangler schema keys.)
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "invocation_logs": true, "head_sampling_rate": 1 }
+  },
 
   // Staging: an isolated copy of the frontend on a *.workers.dev URL (no custom
   // domain), backed by its own D1 (`sec-ex10-staging`) and SESSION KV. Used to
@@ -49,7 +59,11 @@
       "d1_databases": [
         { "binding": "DB", "database_name": "sec-ex10-staging", "database_id": "2d70ff84-8abc-457c-b483-656194217fd2" }
       ],
-      "observability": { "enabled": true }
+      "observability": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "logs": { "invocation_logs": true, "head_sampling_rate": 1 }
+      }
     }
   }
 }

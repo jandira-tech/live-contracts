@@ -25,9 +25,11 @@ The live loaders in `src/loaders/` call those functions, which default to `getDb
 
 ## Design system
 
-Light editorial-technical theme (tokens in `src/styles/global.css`). Two font families only:
-**Manrope** (body, Google Fonts) and self-hosted **Departure Mono** (mono, `public/fonts/`). The
-structural yellow accent is never used as text color. `bun run test:fonts` guards the font wiring.
+Light editorial-technical theme (tokens in `src/styles/global.css`). Canonical brand fonts, both
+**self-hosted** (latin-subset variable woff2 in `public/fonts/`, no external request): **Libre
+Franklin** (body/display) and **Roboto Mono** (mono — labels, wordmark, code); Departure Mono is
+retained as the mono fallback. The structural yellow accent is never used as text color. `bun run
+test:fonts` guards the font wiring.
 
 ## Config
 

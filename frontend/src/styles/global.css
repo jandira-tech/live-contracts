@@ -5,10 +5,30 @@
    never textual. Sharp corners only (--radius: 0).
    ========================================================================= */
 
-/* Manrope is loaded via <link rel="preconnect"> + stylesheet in Base.astro
-   (avoids the render-blocking @import waterfall). Mono is self-hosted below. */
+/* Canonical brand primaries — both self-hosted from /public/fonts (latin subset,
+   variable woff2). No external font request: the prior Google-Fonts Manrope link
+   is gone from Base.astro. Departure Mono is retained below as the documented
+   mono fallback. */
 
-/* Departure Mono — self-hosted from /public/fonts. */
+/* Libre Franklin — body + display (canonical sans, variable 100–900). */
+@font-face {
+  font-family: 'Libre Franklin';
+  src: url('/fonts/libre-franklin.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Roboto Mono — labels, wordmark, code (canonical mono, variable 100–700). */
+@font-face {
+  font-family: 'Roboto Mono';
+  src: url('/fonts/roboto-mono.woff2') format('woff2');
+  font-weight: 100 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Departure Mono — retained as the documented mono fallback (was the prior canonical). */
 @font-face {
   font-family: 'Departure Mono';
   src: url('/fonts/DepartureMono-Regular.woff2') format('woff2'),
@@ -29,9 +49,9 @@
   --border: #E8E8E5;        /* hairline */
   --hover: #F0F0EE;         /* tile hover state */
 
-  /* ----- Type stacks ----- */
-  --font-body: 'Manrope', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: 'Departure Mono', ui-monospace, Menlo, Consolas, monospace;
+  /* ----- Type stacks (canonical DS primaries) ----- */
+  --font-body: 'Libre Franklin', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'Roboto Mono', 'Departure Mono', 'Space Mono', ui-monospace, Menlo, Consolas, monospace;
 
   /* ----- Layout / rules / motion ----- */
   --max-width: 1100px;
@@ -56,6 +76,7 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
+html { -webkit-text-size-adjust: 100%; }       /* MOBILE PASS: no iOS auto-zoom of text */
 
 ::selection { background: var(--accent); color: var(--text); }
 
@@ -104,6 +125,13 @@ a:hover { text-decoration: underline; text-decoration-color: var(--accent); text
 .sl-nav-link .live-dot { width: 6px; height: 6px; border-radius: 0; background: var(--accent); animation: pulse 1.6s infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
 
+/* MOBILE PASS — nav reflows to a two-row stack so links never crush the wordmark. */
+@media (max-width: 560px) {
+  .sl-nav-inner { flex-direction: column; align-items: stretch; gap: 0.55rem; padding: 0.8rem 1.1rem; }
+  .sl-nav-links { gap: 1.4rem; justify-content: flex-start; }
+  .sl-nav-link { font-size: 0.72rem; }
+}
+
 /* ---------- Hero / page header ---------- */
 .sl-hero { padding: 3rem 0 2rem; }
 .sl-hero-eyebrow {
@@ -123,9 +151,20 @@ a:hover { text-decoration: underline; text-decoration-color: var(--accent); text
 .sl-hero h1 {
   font-family: var(--font-body); font-size: 2.1rem; font-weight: 400; letter-spacing: -0.02em;
   line-height: 1.2; max-width: 760px; margin: 0 0 1.4rem; color: var(--text);
+  text-wrap: pretty;
 }
 .sl-hero p.lede { font-size: 1rem; line-height: 1.6; color: var(--text-secondary); max-width: 620px; margin: 0; }
 .sl-hero hr.divider { height: var(--rule-yellow-h); width: var(--rule-yellow-w); background: var(--accent); border: 0; margin: 2.25rem 0 0; }
+
+/* MOBILE PASS — hero breathes less, headline scales with the viewport. */
+@media (max-width: 620px) {
+  .sl-hero { padding: 2rem 0 1.4rem; }
+  .sl-hero h1 { font-size: clamp(1.45rem, 6.2vw, 1.9rem); margin-bottom: 1.1rem; }
+  .sl-hero p.lede { font-size: 0.94rem; }
+  .sl-hero hr.divider { margin-top: 1.6rem; }
+  .sl-hero-eyebrow { margin-bottom: 1.1rem; font-size: 0.66rem; }
+  .sl-hero-eyebrow .sep:last-of-type { display: none; }   /* trim the trailing separator on wrap */
+}
 
 /* Export-to-Cicero pill — structural yellow fill, mono label, sharp corners. */
 .sl-export { margin: 1.1rem 0 0; }
@@ -144,14 +183,21 @@ a:hover { text-decoration: underline; text-decoration-color: var(--accent); text
 .filing-details dt { color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; }
 .filing-details dd { margin: 0; color: var(--text); }
 .filing-details .items { margin: 0.4rem 0 0; padding-left: 1.1rem; color: var(--text); font-size: 0.85rem; }
+/* MOBILE PASS — definition list goes single-column so labels & values don't collide. */
+@media (max-width: 560px) {
+  .filing-details dl { grid-template-columns: 1fr; gap: 0.15rem 0; }
+  .filing-details dt { margin-top: 0.55rem; }
+  .filing-details dt:first-child { margin-top: 0; }
+}
 
 .empty { color: var(--text-secondary); padding: 2rem 0; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); }
 
 .pagination { display: flex; gap: 0.5rem; align-items: center; justify-content: center; margin: 1.6rem 0; flex-wrap: wrap; }
 .pagination a, .pagination span {
   font-family: var(--font-mono); font-size: 0.82rem; padding: 0.4rem 0.7rem;
-  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); cursor: pointer;
 }
+.pagination a:hover { text-decoration: none; border-color: var(--text); }
 .pagination .current { background: var(--accent); color: var(--text); border-color: var(--accent); font-weight: 700; }
 .pagination .disabled { opacity: 0.4; pointer-events: none; }
 
@@ -163,7 +209,13 @@ a:hover { text-decoration: underline; text-decoration-color: var(--accent); text
 .prose a { text-decoration: underline; text-decoration-color: var(--text-secondary); text-underline-offset: 3px; }
 .prose a:hover { text-decoration-color: var(--text); }
 .prose table { border-collapse: collapse; width: 100%; }
-.prose td, .prose th { border: 1px solid var(--border); padding: 0.4rem 0.6rem; }
+.prose td, .prose th { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; }
+/* MOBILE PASS — tighter prose padding + horizontally-scrollable wide tables. */
+@media (max-width: 560px) {
+  .prose { padding: 1.1rem 1.15rem; }
+  .prose .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .prose table { font-size: 0.84rem; }
+}
 
 footer.site { border-top: 1px solid var(--border); color: var(--text-secondary); font-family: var(--font-mono); font-size: 0.74rem; letter-spacing: 0.08em; text-transform: uppercase; padding: 1.5rem 0; margin-top: 3rem; }
 /* Emphasis via color, not weight — Departure Mono is regular-only (no faux bold). */
@@ -186,11 +238,11 @@ footer.site .footer-links a:hover { text-decoration: none; color: var(--text); }
 .sl-stats > div { background: var(--bg); padding: 1.4rem 1.5rem; }
 .sl-stats .num { font-family: var(--font-mono); font-size: 1.75rem; font-weight: 400; letter-spacing: -0.02em; color: var(--text); display: block; line-height: 1.1; margin-bottom: 0.5rem; font-variant-numeric: tabular-nums; }
 .sl-stats .label { font-family: var(--font-mono); font-size: 0.625rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-secondary); }
-@media (max-width: 620px) { .sl-stats { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .sl-stats { grid-template-columns: 1fr; margin: 1.6rem 0 2rem; } .sl-stats > div { padding: 1.1rem 1.25rem; } }
 
 /* ---------- Section bar ---------- */
 .sl-section-bar {
-  display: flex; justify-content: space-between; align-items: baseline;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem 1rem; flex-wrap: wrap;
   padding: 1rem 0 0.4rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem;
 }
 .sl-section-bar .title { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); display: inline-flex; align-items: center; gap: 0.4rem; }
@@ -203,13 +255,18 @@ footer.site .footer-links a:hover { text-decoration: none; color: var(--text); }
 .sl-row {
   display: grid; grid-template-columns: 180px 1fr; gap: 2rem;
   padding: 1.5rem 0.9rem; border-bottom: 1px solid var(--border);
-  position: relative; color: inherit; transition: background var(--t-fast);
+  position: relative; color: inherit; transition: background var(--t-fast); cursor: pointer;
+  text-align: left;
 }
 .sl-row:last-child { border-bottom: 0; }
 .sl-row:hover { background: var(--hover); text-decoration: none; }
 .sl-row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); transition: width var(--t-fast); }
 .sl-row:hover::before { width: 4px; }
-@media (max-width: 620px) { .sl-row { grid-template-columns: 1fr; gap: 0.75rem; } }
+/* New-row flash when an item streams in on the live feed. */
+@keyframes row-flash { from { background: var(--accent); } to { background: transparent; } }
+.sl-row.is-new { animation: row-flash 1.6s ease-out; }
+/* MOBILE PASS — single column, comfortable gap, a touch more side padding. */
+@media (max-width: 620px) { .sl-row { grid-template-columns: 1fr; gap: 0.7rem; padding: 1.25rem 0.6rem; } }
 
 .sl-row-meta { font-family: var(--font-mono); font-size: 0.625rem; letter-spacing: 0.1em; color: var(--text-secondary); line-height: 1.75; text-transform: uppercase; }
 /* Company/filer headline of a row — body font, not mono-uppercase (company names mangle). */
@@ -218,7 +275,7 @@ footer.site .footer-links a:hover { text-decoration: none; color: var(--text); }
 .sl-row-meta .form-pill { display: inline-block; border: 1px solid var(--border); padding: 2px 6px; margin-right: 6px; letter-spacing: 0.1em; }
 .sl-row-meta .meta-line { display: block; margin-top: 4px; word-break: break-all; }
 
-.sl-row-body h3 { font-family: var(--font-body); font-size: 1rem; font-weight: 600; letter-spacing: -0.005em; line-height: 1.3; color: var(--text); margin: 0 0 0.6rem; }
+.sl-row-body h3 { font-family: var(--font-body); font-size: 1rem; font-weight: 600; letter-spacing: -0.005em; line-height: 1.3; color: var(--text); margin: 0 0 0.6rem; text-wrap: pretty; }
 /* Up to 4 lines on desktop, 3 on mobile — don't over-prune the preview. */
 .sl-row-body p.excerpt { font-family: var(--font-body); font-size: 0.875rem; line-height: 1.55; color: var(--text-secondary); margin: 0 0 0.75rem; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 @media (max-width: 620px) { .sl-row-body p.excerpt { -webkit-line-clamp: 3; line-clamp: 3; } }
@@ -232,14 +289,14 @@ footer.site .footer-links a:hover { text-decoration: none; color: var(--text); }
 .sl-row-body .filed .kind { color: var(--text); }
 
 /* ---------- Tail link (browse-all) ---------- */
-.sl-tail-link { display: inline-flex; align-items: center; gap: 0.6rem; font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); padding: 1.5rem 0; position: relative; }
+.sl-tail-link { display: inline-flex; align-items: center; gap: 0.6rem; font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text); padding: 1.5rem 0; position: relative; cursor: pointer; }
 .sl-tail-link:hover { text-decoration: none; }
 .sl-tail-link::after { content: ''; position: absolute; left: 0; bottom: 1.1rem; height: 2px; width: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform var(--t-base); }
 .sl-tail-link:hover::after { transform: scaleX(1); }
 
 /* ---------- Search — full-width input + dark submit ---------- */
 .sl-search-row { display: flex; gap: 0; border: 1px solid var(--text); margin-top: 1.5rem; }
-.sl-search-row input { flex: 1; font-family: var(--font-body); font-size: 1.25rem; padding: 1.1rem 1.4rem; background: var(--bg); border: 0; color: var(--text); letter-spacing: -0.01em; }
+.sl-search-row input { flex: 1; min-width: 0; font-family: var(--font-body); font-size: 1.25rem; padding: 1.1rem 1.4rem; background: var(--bg); border: 0; color: var(--text); letter-spacing: -0.01em; }
 .sl-search-row input:focus { outline: none; }
 /* Keyboard focus must stay visible (WCAG 2.4.7); ring the whole row on focus-within. */
 .sl-search-row:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -247,6 +304,11 @@ footer.site .footer-links a:hover { text-decoration: none; color: var(--text); }
 .sl-search-row button { font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; padding: 0 1.75rem; border: 0; background: var(--text); color: var(--bg); cursor: pointer; }
 .sl-search-row button:hover { color: var(--accent); }
 .sl-search-hint { font-family: var(--font-mono); font-size: 0.625rem; letter-spacing: 0.1em; color: var(--text-secondary); text-transform: uppercase; margin-top: 0.5rem; }
+/* MOBILE PASS — keep the input ≥16px (no iOS zoom) and shrink the padding/label. */
+@media (max-width: 560px) {
+  .sl-search-row input { font-size: 1.05rem; padding: 0.9rem 1rem; }
+  .sl-search-row button { padding: 0 1.1rem; }
+}
 
 /* ---------- Browse — filter sidebar + list ---------- */
 .sl-browse-layout { display: grid; grid-template-columns: 200px 1fr; gap: 2.5rem; }

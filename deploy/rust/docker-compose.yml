@@ -50,16 +50,16 @@ services:
     # binds the host side as root.
     ports:
       - "127.0.0.1:${HOST_PORT:-7860}:${PORT:-7860}"
-    # The runtime image is intentionally minimal (no curl/wget), so health is
-    # observed externally via the tunnel hitting /health. To enable an
-    # in-container check, add `curl` to the runtime stage of backend-rust/
-    # Dockerfile and uncomment:
-    # healthcheck:
-    #   test: ["CMD", "curl", "-fsS", "http://localhost:${PORT:-7860}/health"]
-    #   interval: 30s
-    #   timeout: 5s
-    #   retries: 3
-    #   start_period: 20s
+    # In-container health probe: the runtime image now ships `curl` (added to the
+    # runtime stage of backend-rust/Dockerfile) so Docker can hit GET /health —
+    # the producer's only inbound surface — directly. start_period covers the
+    # cold-start before the health server binds.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:${PORT:-7860}/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     logging:
       driver: json-file
       options:

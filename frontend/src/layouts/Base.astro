@@ -28,10 +28,11 @@ const isSearch = path.startsWith('/search');
     <meta name="description" content={description} />
     {refreshSeconds ? <meta http-equiv="refresh" content={String(refreshSeconds)} /> : null}
     <title>{title}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📄</text></svg>" />
+    <!-- Canonical brand fonts are self-hosted (see global.css @font-face); preload
+         the two variable woff2 so first paint isn't blocked on CSS discovery. -->
+    <link rel="preload" href="/fonts/libre-franklin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/roboto-mono.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23FAFAF8'/><rect x='3' y='3' width='5' height='5' fill='%23FFD400'/></svg>" />
   </head>
   <body>
     <nav class="sl-nav">
