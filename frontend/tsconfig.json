@@ -4,5 +4,8 @@
     "types": ["@cloudflare/workers-types"]
   },
   "include": [".astro/types.d.ts", "**/*"],
-  "exclude": ["dist"]
+  // `test/` is type-checked by Vitest (vitest.config.ts) with the Workers pool,
+  // which provides the virtual `cloudflare:test` module. `astro check` validates
+  // the app, not the test harness, so it's excluded here.
+  "exclude": ["dist", "test"]
 }

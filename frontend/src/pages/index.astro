@@ -8,7 +8,7 @@ import { ex10Stats, type Ex10Summary } from '../lib/api';
 // every 60s (Base refreshSeconds) so the window always shows the newest material
 // contracts the backend has captured.
 const WINDOW = 60;
-const { entries, error } = await getLiveCollection('agreements', { filter: { seconds: WINDOW } });
+const { entries, error } = await getLiveCollection('agreements', { seconds: WINDOW });
 // getLiveCollection re-sorts entries by id; force newest-by-filing-time first
 // (filed_at is the SEC acceptance time; fall back to capture time until backfilled).
 const items: Ex10Summary[] = (entries ?? [])

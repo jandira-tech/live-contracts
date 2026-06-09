@@ -29,15 +29,16 @@ export const exhibits = sqliteTable(
     sizeBytes: integer('size_bytes'), // submission size in bytes (nullable)
     detectedAt: text('detected_at'), // canonical RFC3339 UTC detection timestamp
   },
-  (t) => ({
+  // Array form (the object form is deprecated in drizzle-orm).
+  (t) => [
     // Matches the source SQLite UNIQUE(accession, doc_type, filename) exactly —
     // do NOT drop doc_type or distinct exhibits get coalesced.
-    uniqAccDocFile: uniqueIndex('uniq_acc_doc_file').on(t.accession, t.docType, t.filename),
-    idxFiledAt: index('idx_ex_filed_at').on(t.filedAt),
-    idxForm: index('idx_ex_form_type').on(t.formType),
-    idxCik: index('idx_ex_cik').on(t.cik),
-    idxDetectedAt: index('idx_ex_detected_at').on(t.detectedAt),
-  }),
+    uniqueIndex('uniq_acc_doc_file').on(t.accession, t.docType, t.filename),
+    index('idx_ex_filed_at').on(t.filedAt),
+    index('idx_ex_form_type').on(t.formType),
+    index('idx_ex_cik').on(t.cik),
+    index('idx_ex_detected_at').on(t.detectedAt),
+  ],
 );
 
 export type ExhibitRow = typeof exhibits.$inferSelect;
