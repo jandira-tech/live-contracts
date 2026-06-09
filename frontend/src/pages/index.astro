@@ -4,11 +4,12 @@ import AgreementRow from '../components/AgreementRow.astro';
 import { getLiveCollection } from 'astro:content';
 import { ex10Stats, type Ex10Summary } from '../lib/api';
 
-// Live, request-time: agreements found in the last 60 seconds. Page auto-refreshes
-// every 60s (Base refreshSeconds) so the window always shows the newest material
-// contracts the backend has captured.
-const WINDOW = 60;
-const { entries, error } = await getLiveCollection('agreements', { seconds: WINDOW });
+// Live, request-time: the latest agreements regardless of when they were filed
+// (NOT a 60s window — the feed must never sit empty between filings). Page
+// auto-refreshes every REFRESH seconds so new contracts appear on their own.
+const LIMIT = 100;
+const REFRESH = 60;
+const { entries, error } = await getLiveCollection('agreements', { pageSize: LIMIT });
 // getLiveCollection re-sorts entries by id; force newest-by-filing-time first
 // (filed_at is the SEC acceptance time; fall back to capture time until backfilled).
 const items: Ex10Summary[] = (entries ?? [])
@@ -20,7 +21,7 @@ const items: Ex10Summary[] = (entries ?? [])
   );
 const stats = await ex10Stats();
 ---
-<Base refreshSeconds={WINDOW}>
+<Base refreshSeconds={REFRESH}>
   <header class="sl-hero">
     <div class="sl-hero-eyebrow">
       <span class="pulse"></span>
@@ -35,14 +36,14 @@ const stats = await ex10Stats();
   </header>
 
   <div class="sl-section-bar">
-    <span class="title">New agreements</span>
-    <span class="meta">last {WINDOW}s · {items.length} shown</span>
+    <span class="title">Latest agreements</span>
+    <span class="meta">{items.length} most recent · refreshes every {REFRESH}s</span>
   </div>
 
   {error ? (
     <div class="empty">The live feed is temporarily unavailable. Retrying on next refresh…</div>
   ) : items.length === 0 ? (
-    <div class="empty">No new EX-10 agreements in the last {WINDOW} seconds. Watching the wire…</div>
+    <div class="empty">No agreements yet. Watching the wire…</div>
   ) : (
     <section class="sl-feed">
       {items.map((item) => <AgreementRow item={item} />)}

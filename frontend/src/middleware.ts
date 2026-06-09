@@ -1,5 +1,5 @@
 import { defineMiddleware } from 'astro:middleware';
-import { ex10Since, listEx10, ex10Search, ex10Detail } from './lib/api';
+import { listEx10, ex10Search, ex10Detail } from './lib/api';
 import { prefersMarkdown, markdownResponse, listMarkdown, detailMarkdown } from './lib/markdown';
 
 // RFC 8288 Link relations for agent discovery, emitted on every HTML document.
@@ -10,7 +10,7 @@ const LINKS = [
   '</sitemap.xml>; rel="sitemap"; type="application/xml"',
 ];
 
-const WINDOW = 60;
+const HOME_LIMIT = 100;
 const PAGE_SIZE = 12;
 
 // Build the markdown representation for a page URL when an agent asks for it.
@@ -21,11 +21,11 @@ async function buildMarkdown(url: URL): Promise<string | null | undefined> {
   const sp = url.searchParams;
 
   if (path === '/' || path === '') {
-    const res = await ex10Since(WINDOW);
+    const r = await listEx10(1, HOME_LIMIT, { sort: 'newest' });
     return listMarkdown(
-      'Live Contracts — newest EX-10 material contracts',
-      `Material contract exhibits filed with SEC EDGAR in the last ${WINDOW}s.`,
-      res.items,
+      'Live Contracts — latest EX-10 material contracts',
+      `The ${r.items.length} most recent material contract exhibits from SEC EDGAR.`,
+      r.items,
     );
   }
 
