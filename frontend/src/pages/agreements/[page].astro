@@ -1,6 +1,6 @@
 ---
 import Base from '../../layouts/Base.astro';
-import AgreementRow from '../../components/AgreementRow.astro';
+import DocketRow from '../../components/DocketRow.astro';
 import { listEx10, ex10Facets } from '../../lib/api';
 
 // Live SSR (no prerender): request-time, paginated, query-param driven filters.
@@ -90,7 +90,7 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-rev
         <div class="empty">No agreements match these filters.</div>
       ) : (
         <section class="sl-feed">
-          {result.items.map((item) => <AgreementRow item={item} />)}
+          {result.items.map((item) => <DocketRow item={item} />)}
         </section>
       )}
 
