@@ -30,14 +30,24 @@ export function stripMdHead(md: string | null | undefined): string {
   return md.replace(/^﻿/, '').replace(FILENAME_HEAD, '').trimStart();
 }
 
+// Noise in a card preview: markdown image refs (relative SEC URLs → broken
+// anyway) and the redundant leading "Exhibit 10.x" label (the whole site is
+// EX-10). Stripped from the *snippet* only; the detail page keeps the full doc.
+const MD_IMAGE = /!\[[^\]]*\]\([^)]*\)/g;
+const LEADING_EXHIBIT = /^[ \t]*(?:#{1,6}[ \t]*)?\**[ \t]*(?:exhibit|ex)\b[ \t.\-]*\d+(?:\.\d+)?[ \t]*\**[ \t]*(?:\r?\n+|$)/i;
+
 // A *markdown* excerpt for the visual cards: a leading slice of the real markdown
-// (markers intact), cut on a block boundary so marked never sees a half-open
-// marker or table. Rendered by marked, identical to the detail page — no
-// hand-rolled clause splitting or quote-bolding.
+// (markers intact), cleaned of the noise above and cut on a block boundary so
+// marked never sees a half-open marker/table. Rendered by marked, same as the
+// detail page — no hand-rolled clause splitting or quote-bolding.
 export function markdownExcerpt(md: string | null | undefined, limit = 1100): string {
-  const s = stripMdHead(md);
+  let s = stripMdHead(md);
   if (!s) return '';
-  if (s.length <= limit) return s.trimEnd();
+  s = s.replace(MD_IMAGE, '').replace(/\[\]\([^)]*\)/g, ''); // images + emptied links
+  for (let i = 0; i < 3 && LEADING_EXHIBIT.test(s); i++) s = s.replace(LEADING_EXHIBIT, '');
+  s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim(); // collapse excessive newlines
+  if (!s) return '';
+  if (s.length <= limit) return s;
   const cut = s.slice(0, limit);
   const para = cut.lastIndexOf('\n\n');
   const line = cut.lastIndexOf('\n');
