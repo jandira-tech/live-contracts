@@ -13,41 +13,23 @@ impl MarkdownStatus {
 /// Convert an HTML document to Markdown. Empty input or any conversion failure
 /// yields "" (never panics). Output is trimmed.
 ///
-/// Uses quick_html2md with **tables flattened to prose**. SEC EX-10 HTML uses
-/// `<table>` for LAYOUT (single-cell wrappers, empty spacer cells), so a
-/// faithful converter (htmd, pandoc, …) emits empty-cell / empty-paragraph junk
-/// that renders as dead whitespace. A 6-converter bake-off over 10 real filings
-/// (.context/md-converters) showed this config alone yields 0 empty cells /
-/// 0 empty paragraphs while keeping all text, emphasis, links and lists.
-/// Falls back to htmd if quick_html2md yields nothing.
+/// Uses html2markdown (AST-to-AST), which keeps SEC EX-10 tables as GFM tables
+/// rather than flattening them — chosen after a 6-converter bake-off over 10
+/// real filings (.context/md-converters) for the most faithful rendering of the
+/// original form/table layout. Falls back to htmd if html2markdown yields nothing.
 pub fn html_to_markdown(html: &str) -> String {
     if html.trim().is_empty() {
         return String::new();
     }
-    let opts = quick_html2md::MarkdownOptions {
-        preserve_headings: true,
-        include_links: true,
-        include_images: false, // relative SEC image URLs would render as broken refs
-        preserve_emphasis: true,
-        preserve_strikethrough: true,
-        preserve_lists: true,
-        preserve_code: true,
-        preserve_blockquotes: true,
-        preserve_tables: false, // SEC uses <table> for LAYOUT → flatten to prose
-        max_heading_level: 6,
-        commonmark: false,
-        escape_special_chars: false,
-        base_url: None,
-    };
     let md = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        quick_html2md::html_to_markdown_with_options(html, &opts)
+        html2markdown::convert(html)
     }))
     .map(|s| s.trim().to_string())
     .unwrap_or_default();
     if !md.is_empty() {
         return md;
     }
-    // Fallback: htmd (mature) if quick_html2md panicked or produced nothing.
+    // Fallback: htmd (mature) if html2markdown panicked or produced nothing.
     htmd::convert(html)
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
