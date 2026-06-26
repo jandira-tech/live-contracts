@@ -25,9 +25,13 @@ export function cleanExcerpt(text: string | null | undefined, limit = 1000): str
 // Drop just that token — nothing else — so the snippet and the detail page render
 // the same clean markdown through marked.
 const FILENAME_HEAD = /^\s*\S+\.(?:html?|txt)\b[\s\\]*/i;
+// EDGARMaster prepends a one-line SEC SGML header — "<TYPE> <SEQUENCE> <FILENAME>
+// <DESCRIPTION>" (e.g. "EX-10.1 3 aspi_ex101.htm SUBSCRIPTION AGREEMENT") — plus an
+// HTML comment, before the exhibit body. None of it is document content.
+const SEC_HEADER = /^﻿?[ \t]*(?:EX-[\w.\-]+[ \t]+\d+[ \t]+\S+\.(?:html?|txt)\b[^\n]*\n+)?(?:<!--[\s\S]*?-->\s*)*/i;
 export function stripMdHead(md: string | null | undefined): string {
   if (!md) return '';
-  return md.replace(/^﻿/, '').replace(FILENAME_HEAD, '').trimStart();
+  return md.replace(SEC_HEADER, '').replace(FILENAME_HEAD, '').trimStart();
 }
 
 // Noise in a card preview: markdown image refs (relative SEC URLs → broken
