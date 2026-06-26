@@ -10,6 +10,9 @@ wheels/
 .venv
 node_modules/
 
+# macOS Finder cruft
+.DS_Store
+
 # Runtime artifacts (must not churn git)
 *.db
 *.db-journal
