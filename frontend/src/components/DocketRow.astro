@@ -37,7 +37,8 @@ function inlineParts(text: string): { t: string; bold: boolean }[] {
 
 // Bound the work: real excerpts can be long; the body is height-capped anyway.
 const raw = (item.excerpt || '').slice(0, 1400);
-let body = raw;
+// Real excerpts can lead with the source filename (e.g. "foo\_ex103.htm "); drop it.
+let body = raw.replace(/^\s*\S+\.(?:html?|txt)\b[\s—–-]*/i, '');
 let exLabel: string | null = null;
 const exMatch = body.match(/^\s*Exhibit\s+([\d.]+)\s+/i);
 if (exMatch) { exLabel = `Exhibit ${exMatch[1]}`; body = body.slice(exMatch[0].length); }
