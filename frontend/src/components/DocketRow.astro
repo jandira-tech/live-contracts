@@ -1,6 +1,7 @@
 ---
 import type { Ex10Summary } from '../lib/api';
 import { formatNY, formatFiledAt } from '../lib/time';
+import { marked } from 'marked';
 
 interface Props { item: Ex10Summary; }
 const { item } = Astro.props;
@@ -12,41 +13,10 @@ const party = item.company_name?.trim() || item.doc_type;
 const filedLabel = formatFiledAt(item.filed_at) || formatNY(item.found_at);
 const href = `/agreement/${item.id}`;
 
-// ---- markdown-extract parsing (ported from the design prototype) ----
-// A rendered markdown body reads as clauses, not a run-on: break on the
-// recital/section/article/numbered/lettered boundaries a drafter would use.
-function splitBlocks(text: string): string[] {
-  let t = ' ' + String(text).trim() + ' ';
-  t = t.replace(/\s+(WHEREAS,)/g, '\n$1');
-  t = t.replace(/\s+(NOW,? THEREFORE,?)/g, '\n$1');
-  t = t.replace(/\s+(NOW IT IS HEREBY AGREED)/g, '\n$1');
-  t = t.replace(/\s+(SECTION\s+\d+(?:\.\d+)?)/g, '\n$1');
-  t = t.replace(/\s+(ARTICLE\s+(?:ONE|TWO|THREE|FOUR|FIVE|[IVXLC]+|\d+)\b)/g, '\n$1');
-  t = t.replace(/\s+(\d{1,2}\.)\s+(?=[A-Z])/g, '\n$1 ');
-  t = t.replace(/\s+(\([a-z]\))\s+(?=[A-Za-z])/g, '\n$1 ');
-  return t.split('\n').map((s) => s.trim()).filter(Boolean);
-}
-
-// Split a block into parts, flagging quoted defined terms ("Seller") for <strong>.
-function inlineParts(text: string): { t: string; bold: boolean }[] {
-  return String(text)
-    .split(/(["“][^"”]{1,48}["”])/g)
-    .filter((p) => p !== '')
-    .map((p) => ({ t: p, bold: /^["“][^"”]{1,48}["”]$/.test(p) }));
-}
-
-// Bound the work: real excerpts can be long; the body is height-capped anyway.
-const raw = (item.excerpt || '').slice(0, 1400);
-// Real excerpts can lead with the source filename (e.g. "foo\_ex103.htm "); drop it.
-let body = raw.replace(/^\s*\S+\.(?:html?|txt)\b[\s—–-]*/i, '');
-let exLabel: string | null = null;
-const exMatch = body.match(/^\s*Exhibit\s+([\d.]+)\s+/i);
-if (exMatch) { exLabel = `Exhibit ${exMatch[1]}`; body = body.slice(exMatch[0].length); }
-// Lift a leading ALL-CAPS run into a heading, the way an extractor would.
-let heading: string | null = null;
-const headMatch = body.match(/^([A-Z][A-Z0-9 ,.&'’()\/\-]{4,100}?[A-Z])\s(?=[A-Z][a-z])/);
-if (headMatch) { heading = headMatch[1].replace(/\s+/g, ' ').trim(); body = body.slice(headMatch[0].length); }
-const blocks = raw ? splitBlocks(body) : [];
+// One renderer everywhere: the markdown excerpt is rendered by marked — exactly
+// like the detail page. No hand-rolled clause splitting or quote-bolding.
+const body = (item.excerpt_md || '').trim();
+const bodyHtml = body ? marked.parse(body) : '';
 ---
 <article class="sl-doc">
   {/* identity column — title + filer */}
@@ -55,20 +25,12 @@ const blocks = raw ? splitBlocks(body) : [];
     <p class="sl-doc-party">{party}</p>
   </div>
 
-  {/* the document — stacked hairline sheets, straight to the text */}
+  {/* the document — stacked hairline sheets, real markdown via marked */}
   <div class="sl-doc-body">
-    {raw ? (
+    {body ? (
       <div class="sl-doc-extract">
         <div class="sl-doc-extract-inner">
-          <div class="sl-md">
-            {exLabel ? <span class="sl-md-eyebrow">{exLabel}</span> : null}
-            {heading ? <h4 class="sl-md-h">{heading}</h4> : null}
-            <div class="sl-md-body">
-              {blocks.map((b) => (
-                <p class="sl-md-p">{inlineParts(b).map((p) => (p.bold ? <strong>{p.t}</strong> : p.t))}</p>
-              ))}
-            </div>
-          </div>
+          <div class="sl-md sl-md-body" set:html={bodyHtml} />
         </div>
       </div>
     ) : item.image_urls?.length ? (

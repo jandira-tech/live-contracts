@@ -21,6 +21,30 @@ export function cleanExcerpt(text: string | null | undefined, limit = 1000): str
   return (b > 0 ? cut.slice(0, b) : cut).trimEnd() + '…';
 }
 
+// Real EX-10 markdown often leads with the source filename (e.g. "aspi\_ex101.htm").
+// Drop just that token — nothing else — so the snippet and the detail page render
+// the same clean markdown through marked.
+const FILENAME_HEAD = /^\s*\S+\.(?:html?|txt)\b[\s\\]*/i;
+export function stripMdHead(md: string | null | undefined): string {
+  if (!md) return '';
+  return md.replace(/^﻿/, '').replace(FILENAME_HEAD, '').trimStart();
+}
+
+// A *markdown* excerpt for the visual cards: a leading slice of the real markdown
+// (markers intact), cut on a block boundary so marked never sees a half-open
+// marker or table. Rendered by marked, identical to the detail page — no
+// hand-rolled clause splitting or quote-bolding.
+export function markdownExcerpt(md: string | null | undefined, limit = 1100): string {
+  const s = stripMdHead(md);
+  if (!s) return '';
+  if (s.length <= limit) return s.trimEnd();
+  const cut = s.slice(0, limit);
+  const para = cut.lastIndexOf('\n\n');
+  const line = cut.lastIndexOf('\n');
+  const b = para > limit * 0.4 ? para : line > limit * 0.4 ? line : limit;
+  return s.slice(0, b).trimEnd() + '\n\n…';
+}
+
 export function parseFiling(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {};
   try { const v = JSON.parse(raw); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
@@ -40,7 +64,8 @@ export function rowToSummary(r: Partial<ExhibitRow>): Ex10Summary {
     form_type: r.formType ?? '', doc_type: r.docType ?? '', filename: r.filename ?? '',
     description: r.description ?? '', filing_url: r.filingUrl ?? '', found_at: r.foundAt ?? '',
     markdown_status: r.markdownStatus ?? '',
-    excerpt: cleanExcerpt(r.markdown, 1000), has_markdown: Boolean(r.markdown),
+    excerpt: cleanExcerpt(r.markdown, 1000), excerpt_md: markdownExcerpt(r.markdown),
+    has_markdown: Boolean(r.markdown),
     company_name: String(filing.company_name ?? ''), period: String(filing.period ?? ''),
     location: String(filing.location ?? ''),
     items: Array.isArray(filing.items) ? (filing.items as string[]) : [],

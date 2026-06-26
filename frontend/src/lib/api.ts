@@ -33,7 +33,8 @@ export interface Ex10Summary {
   filing_url: string;
   found_at: string;
   markdown_status: string;
-  excerpt: string;
+  excerpt: string;       // plaintext (markdown stripped) — for agent/MCP text endpoints
+  excerpt_md: string;    // leading markdown slice — rendered by marked on the cards
   has_markdown: boolean;
   // Compact filing-header fields for card footers.
   company_name?: string;

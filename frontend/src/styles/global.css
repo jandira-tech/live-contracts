@@ -376,12 +376,22 @@ footer.site .footer-links a:hover { text-decoration: none; color: var(--text); }
 .sl-doc-extract::after { transform: translate(4px, 4px); }
 .sl-doc-extract::before { transform: translate(8px, 8px); }
 .sl-doc-extract-inner { position: relative; z-index: 1; background: var(--bg); border: 1px solid var(--border); padding: 1rem 1.1rem 1.1rem; }
-.sl-md-eyebrow { display: block; font-family: var(--font-mono); font-size: 0.5625rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 0.55rem; }
-.sl-md-h { font-family: var(--font-body); font-size: 0.875rem; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; color: var(--text); margin: 0 0 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
-.sl-md-body { max-height: 16em; overflow: hidden; }
-.sl-md-p { font-family: var(--font-body); font-size: 0.8125rem; line-height: 1.6; color: var(--text); }
-.sl-md-p + .sl-md-p { margin-top: 0.55rem; }
-.sl-md-p strong { font-weight: 700; color: var(--text); }
+/* Snippet body = the real markdown excerpt rendered by marked (same engine as the
+   detail page). Compact + height-capped; styles marked's elements, not classes. */
+.sl-md-body { max-height: 16em; overflow: hidden; font-family: var(--font-body); font-size: 0.8125rem; line-height: 1.6; color: var(--text); }
+.sl-md-body > :first-child { margin-top: 0; }
+.sl-md-body p { margin: 0 0 0.55rem; }
+.sl-md-body :is(h1, h2, h3, h4, h5, h6) { font-family: var(--font-body); font-size: 0.875rem; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; color: var(--text); margin: 0.7rem 0 0.4rem; }
+.sl-md-body strong { font-weight: 700; color: var(--text); }
+.sl-md-body em { font-style: italic; }
+.sl-md-body a { color: inherit; text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 2px; }
+.sl-md-body ul, .sl-md-body ol { margin: 0 0 0.55rem; padding-left: 1.1rem; }
+.sl-md-body li { margin: 0.12rem 0; }
+.sl-md-body blockquote { margin: 0 0 0.55rem; padding-left: 0.65rem; border-left: 2px solid var(--border); color: var(--text-secondary); }
+.sl-md-body code { font-family: var(--font-mono); font-size: 0.88em; }
+.sl-md-body table { border-collapse: collapse; width: 100%; font-size: 0.72rem; margin: 0 0 0.55rem; }
+.sl-md-body :is(th, td) { border: 1px solid var(--border); padding: 0.2rem 0.4rem; text-align: left; vertical-align: top; }
+.sl-md-body img { max-width: 100%; height: auto; }
 .sl-doc-body .scanned { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-secondary); margin: 0 0 0.75rem; }
 
 .sl-doc-foot { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; font-family: var(--font-mono); font-size: 0.59rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-secondary); }
