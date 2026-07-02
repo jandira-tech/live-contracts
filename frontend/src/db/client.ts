@@ -1,6 +1,7 @@
 import { drizzle, type DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle as drizzleLocal } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
+import { env } from 'cloudflare:workers';
 import * as schema from './schema';
 
 export type DB = DrizzleD1Database<typeof schema> | ReturnType<typeof drizzleLocal>;
@@ -12,16 +13,10 @@ let _db: DB | null = null;
 export function getDb(): DB {
   if (_db) return _db;
 
-  // Try Cloudflare D1 binding first
-  try {
-    // @ts-ignore - env may not exist in local dev
-    const { env } = require('cloudflare:workers');
-    if (env && (env as Env).DB) {
-      _db = drizzle((env as Env).DB, { schema });
-      return _db;
-    }
-  } catch {
-    // cloudflare:workers not available, fall back to local SQLite
+  // Use D1 binding if env.DB exists
+  if (env?.DB) {
+    _db = drizzle((env as Env).DB, { schema });
+    return _db;
   }
 
   // Local dev fallback: use better-sqlite3
@@ -31,10 +26,11 @@ export function getDb(): DB {
 }
 
 // Test-only: clear the cached singleton between test files.
-export function _resetDb(): void { 
+export function _resetDb(): void {
   if (_db) {
-    // @ts-ignore - close() exists on better-sqlite3
-    _db?.client?.close?.();
+    // Close the underlying SQLite connection on better-sqlite3 instances
+    // @ts-ignore - $client exists on drizzle better-sqlite3 instances
+    (_db as any)?.$client?.close?.();
   }
-  _db = null; 
+  _db = null;
 }

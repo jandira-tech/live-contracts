@@ -1,8 +1,14 @@
 import Database from 'better-sqlite3';
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 
 const DB_PATH = './.local-db.sqlite';
+
+// Delete existing database if it exists to ensure idempotency
+if (existsSync(DB_PATH)) {
+  unlinkSync(DB_PATH);
+  console.log(`Deleted existing database at ${DB_PATH}`);
+}
 
 // Create fresh local database
 const db = new Database(DB_PATH);
