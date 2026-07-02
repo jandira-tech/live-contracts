@@ -21,12 +21,12 @@
     "drizzle-orm": "^0.45.2",
     "marked": "^18.0.5"
   },
-  "trustedDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64"],
+  "trustedDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64", "better-sqlite3"],
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@cloudflare/vitest-pool-workers": "^0.17.0",
     "@cloudflare/workers-types": "^4.20260702.1",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.11.1",
     "drizzle-kit": "^0.31.10",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
