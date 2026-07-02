@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database from 'bun:sqlite';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
@@ -30,7 +30,7 @@ for (const file of migrationFiles) {
 
 // Seed with dummy data
 console.log('Seeding dummy data...');
-const insertStmt = db.prepare(`
+const insertStmt = db.query(`
   INSERT INTO exhibits (
     id, accession, cik, form_type, doc_type, filename, description, sequence,
     filing_url, found_at, filed_at, markdown_status, filing_metadata, image_urls, markdown
@@ -91,7 +91,7 @@ for (const row of dummyData) {
 console.log(`  ✓ Inserted ${dummyData.length} dummy records`);
 
 // Verify
-const count = db.prepare('SELECT COUNT(*) as n FROM exhibits').get() as { n: number };
+const count = db.query('SELECT COUNT(*) as n FROM exhibits').get() as { n: number };
 console.log(`\n✅ Local database ready at ${DB_PATH} with ${count.n} exhibits`);
 
 db.close();

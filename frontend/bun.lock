@@ -22,6 +22,7 @@
     },
   },
   "trustedDependencies": [
+    "better-sqlite3",
     "esbuild",
     "sharp",
     "@cloudflare/workerd-linux-64",
