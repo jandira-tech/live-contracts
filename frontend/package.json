@@ -21,7 +21,7 @@
     "drizzle-orm": "^0.45.2",
     "marked": "^18.0.5"
   },
-  "trustedDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64", "better-sqlite3"],
+  "trustedDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64"],
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@cloudflare/vitest-pool-workers": "^0.17.0",

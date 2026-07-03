@@ -1,8 +1,15 @@
 import Database from 'bun:sqlite';
-import { readFileSync, readdirSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, unlinkSync } from 'fs';
 import { join } from 'path';
 
 const DB_PATH = './.local-db.sqlite';
+
+// Remove existing database if it exists
+try {
+  if (existsSync(DB_PATH)) {
+    unlinkSync(DB_PATH);
+  }
+} catch {}
 
 // Create fresh local database
 const db = new Database(DB_PATH);
