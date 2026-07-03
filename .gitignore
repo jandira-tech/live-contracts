@@ -49,3 +49,5 @@ deploy/hf-space/seed.db
 secinfra-rust/
 secinfra-rust
 .claude/worktrees/
+**/**/.DS_Store
+.DS_Store
