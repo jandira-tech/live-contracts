@@ -1,7 +1,7 @@
 import { defineConfig, envField } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 
-// Astro 6 hybrid: server output by default, individual pages opt into
+// Astro 7 hybrid: server output by default, individual pages opt into
 // prerendering via `export const prerender = true`. Deployed to Cloudflare
 // Workers; the CDN caches responses (Cache-Control + stale-while-revalidate set
 // per-route and at the API origin).

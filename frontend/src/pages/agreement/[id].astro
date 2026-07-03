@@ -3,6 +3,7 @@ import Base from '../../layouts/Base.astro';
 import { getLiveEntry } from 'astro:content';
 import type { Ex10Detail } from '../../lib/api';
 import { formatNY, formatYmd } from '../../lib/time';
+import { stripMdHead } from '../../lib/summary';
 import { marked } from 'marked';
 
 // Live SSR via Live Content Collections: fetched at request time by id. No
@@ -15,7 +16,7 @@ if (error || !detail) {
   return Astro.redirect('/404');
 }
 
-const html = detail.markdown ? marked.parse(detail.markdown) : '';
+const html = detail.markdown ? marked.parse(stripMdHead(detail.markdown)) : '';
 const title = detail.description?.trim() || `${detail.doc_type} — ${detail.filename}`;
 const images = detail.image_urls ?? [];
 

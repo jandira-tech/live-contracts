@@ -1,6 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
-import AgreementRow from '../components/AgreementRow.astro';
+import DocketRow from '../components/DocketRow.astro';
 import { getLiveCollection } from 'astro:content';
 import { ex10Stats, type Ex10Summary } from '../lib/api';
 
@@ -23,16 +23,25 @@ const stats = await ex10Stats();
 ---
 <Base refreshSeconds={REFRESH}>
   <header class="sl-hero">
-    <div class="sl-hero-eyebrow">
-      <span class="pulse"></span>
-      <span>LIVE</span>
-      <span class="sep">·</span>
-      <span><strong>{stats.total.toLocaleString()}</strong> total agreements</span>
-      <span class="sep">·</span>
-      <span><strong>{stats.last_24h.toLocaleString()}</strong> last 24h</span>
+    <div class="sl-hero-main">
+      <div class="sl-hero-eyebrow">
+        <span class="pulse"></span>
+        <span>LIVE</span>
+      </div>
+      <h1>New material contract exhibits, the moment they hit SEC EDGAR.</h1>
+      <p class="lede">Live Contracts surfaces traditional EX-10 material contracts — credit agreements, employment terms, license deals, indemnification forms — extracted from public SEC filings in near real time. No login. No paywall. Just the documents.</p>
+      <hr class="divider" />
     </div>
-    <h1>New material contract exhibits, the moment they hit SEC EDGAR.</h1>
-    <hr class="divider" />
+    <aside class="sl-hero-stats">
+      <div class="sl-hero-stat">
+        <span class="num">{stats.total.toLocaleString()}</span>
+        <span class="label">Total agreements</span>
+      </div>
+      <div class="sl-hero-stat">
+        <span class="num">{stats.last_24h.toLocaleString()}</span>
+        <span class="label">Filed in last 24h</span>
+      </div>
+    </aside>
   </header>
 
   <div class="sl-section-bar">
@@ -46,7 +55,7 @@ const stats = await ex10Stats();
     <div class="empty">No agreements yet. Watching the wire…</div>
   ) : (
     <section class="sl-feed">
-      {items.map((item) => <AgreementRow item={item} />)}
+      {items.map((item) => <DocketRow item={item} />)}
     </section>
   )}
 
