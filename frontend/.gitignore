@@ -6,3 +6,6 @@ dist/
 .wrangler/
 *-state.json
 auth-*.json
+.DS_Store
+**/.DS_Store
+**/**/.DS_Store
