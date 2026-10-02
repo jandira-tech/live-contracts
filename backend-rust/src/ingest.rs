@@ -47,9 +47,65 @@ pub fn resolve_filed_at(direct: &str, filing_metadata: Option<&str>) -> String {
     String::new()
 }
 
-/// Split a slice into chunks of at most `max` (D1 ingest caps at 200 rows/POST).
-pub fn chunk_rows<T>(rows: &[T], max: usize) -> Vec<&[T]> {
-    rows.chunks(max.max(1)).collect()
+/// D1 rejects a row over 2,000,000 bytes, and the ingest route writes a batch
+/// atomically, so one oversized exhibit used to sink every row posted with it.
+/// Leave headroom for the other columns.
+pub const MAX_ROW_BYTES: usize = 1_900_000;
+/// Keep one POST well under the Worker's request limits.
+pub const MAX_BATCH_BYTES: usize = 8_000_000;
+
+/// Approximate stored size of a row: the text columns that can be large.
+pub fn row_bytes(r: &IngestRecord) -> usize {
+    r.markdown.len()
+        + r.filing_metadata.as_deref().map_or(0, str::len)
+        + r.image_urls.as_deref().map_or(0, str::len)
+        + r.description.len()
+        + r.filing_url.len()
+        + r.filename.len()
+        + 512 // the short columns
+}
+
+/// Truncate the markdown of a row that would not fit in D1, mark it `truncated`
+/// and point to the full exhibit. Rows that fit are returned unchanged.
+pub fn fit_for_d1(mut r: IngestRecord) -> IngestRecord {
+    if row_bytes(&r) <= MAX_ROW_BYTES {
+        return r;
+    }
+    let note = format!(
+        "\n\n---\n\n*Truncated: this exhibit is longer than the database stores. The full text is in the SEC filing: {}*\n",
+        r.filing_url
+    );
+    let room = MAX_ROW_BYTES
+        .saturating_sub(row_bytes(&r) - r.markdown.len())
+        .saturating_sub(note.len());
+    let mut cut = room.min(r.markdown.len());
+    while cut > 0 && !r.markdown.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    r.markdown.truncate(cut);
+    r.markdown.push_str(&note);
+    r.markdown_status = "truncated".into();
+    r
+}
+
+/// Chunk rows by count and by bytes, so a few large exhibits travel alone.
+pub fn chunk_by_size(rows: &[IngestRecord], max_rows: usize, max_bytes: usize) -> Vec<&[IngestRecord]> {
+    let mut out = Vec::new();
+    let (mut start, mut bytes) = (0usize, 0usize);
+    for (i, r) in rows.iter().enumerate() {
+        let b = row_bytes(r);
+        let full = i > start && (i - start >= max_rows.max(1) || bytes + b > max_bytes);
+        if full {
+            out.push(&rows[start..i]);
+            start = i;
+            bytes = 0;
+        }
+        bytes += b;
+    }
+    if start < rows.len() {
+        out.push(&rows[start..]);
+    }
+    out
 }
 
 /// What happened to one POST. `Retry` is worth trying again (transport error, 408,
@@ -210,16 +266,6 @@ mod tests {
         assert_eq!(resolve_filed_at("", None), "");
     }
 
-    #[test]
-    fn chunks_at_200() {
-        let rows: Vec<u64> = (0..450).collect();
-        let chunks = chunk_rows(&rows, 200);
-        assert_eq!(chunks.len(), 3);
-        assert_eq!(chunks[0].len(), 200);
-        assert_eq!(chunks[1].len(), 200);
-        assert_eq!(chunks[2].len(), 50);
-    }
-
     fn row(id: u64) -> IngestRecord {
         IngestRecord {
             id,
@@ -323,5 +369,42 @@ mod tests {
         let second = push_with_budget(&client, &url, "k", &[row(1)], 3, Duration::from_millis(1), &cd).await;
         assert!(matches!(second, PushOutcome::Retry { .. }));
         assert_eq!(script.lock().unwrap().calls, 1, "no call while cooling");
+    }
+
+    fn big(id: u64, md_bytes: usize) -> IngestRecord {
+        let mut r = row(id);
+        r.markdown = "é".repeat(md_bytes / 2); // 2-byte chars: truncation must respect boundaries
+        r.filing_url = "https://www.sec.gov/Archives/edgar/data/1/000000000026000001.txt".into();
+        r
+    }
+
+    #[test]
+    fn oversized_rows_are_truncated_marked_and_linked() {
+        let r = fit_for_d1(big(1, 3_700_000));
+        assert!(row_bytes(&r) <= MAX_ROW_BYTES, "{}", row_bytes(&r));
+        assert_eq!(r.markdown_status, "truncated");
+        assert!(r.markdown.contains("https://www.sec.gov/Archives/edgar/data/1/000000000026000001.txt"));
+        assert!(r.markdown.is_char_boundary(r.markdown.len()));
+    }
+
+    #[test]
+    fn rows_that_fit_are_untouched() {
+        let small = big(2, 10_000);
+        let out = fit_for_d1(small.clone());
+        assert_eq!(out.markdown, small.markdown);
+        assert_eq!(out.markdown_status, small.markdown_status);
+    }
+
+    #[test]
+    fn chunks_respect_both_count_and_bytes() {
+        let rows: Vec<IngestRecord> = vec![big(1, 1_800_000), big(2, 1_800_000), big(3, 1_000), big(4, 1_000), big(5, 1_800_000)];
+        let chunks = chunk_by_size(&rows, 100, 3_000_000);
+        // No chunk over the byte budget unless it is a single row.
+        for c in &chunks {
+            assert!(c.len() == 1 || c.iter().map(row_bytes).sum::<usize>() <= 3_000_000);
+        }
+        assert_eq!(chunks.iter().map(|c| c.len()).sum::<usize>(), 5, "nothing dropped");
+        assert_eq!(chunk_by_size(&rows, 2, usize::MAX).len(), 3, "count cap still applies");
+        assert!(chunk_by_size(&[], 100, 1).is_empty());
     }
 }
