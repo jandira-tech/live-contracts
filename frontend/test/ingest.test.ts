@@ -130,3 +130,9 @@ it('round-trip: an ingested row is visible via the read layer', async () => {
   const res = await listEx10(1, 50, {}, testDb());
   expect(res.items.some((i) => i.accession === 'acc-5')).toBe(true);
 });
+
+it('401 for a wrong key of the same length and for a longer one (constant-time compare)', async () => {
+  expect((await POST(ctx({ rows: [ROW] }, 'secreX'))).status).toBe(401);
+  expect((await POST(ctx({ rows: [ROW] }, 'secret-and-more'))).status).toBe(401);
+  expect((await POST(ctx({ rows: [] }, 'secret'))).status).toBe(200);
+});

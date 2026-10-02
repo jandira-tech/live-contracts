@@ -28,8 +28,15 @@
   // Public custom domain (the arthur.law zone is already on this Cloudflare
   // account). `wrangler deploy` provisions the hostname + edge cert; no manual
   // DNS record needed for a Workers custom domain.
+  // The second entry is a host-specific zone route for the same hostname. A zone
+  // route runs in front of a custom domain, and the most specific pattern wins, so
+  // this keeps a wildcard route on the zone (e.g. `*.arthur.law/*` pointing at some
+  // other Worker) from taking this host. That is exactly what happened from
+  // 2026-08-07 to 2026-10-02: every page, /mcp and every ingest POST were served
+  // by the portfolio Worker. `droplets.arthur.law` carries the same pair.
   "routes": [
-    { "pattern": "live-contracts.arthur.law", "custom_domain": true }
+    { "pattern": "live-contracts.arthur.law", "custom_domain": true },
+    { "pattern": "live-contracts.arthur.law/*", "zone_name": "arthur.law" }
   ],
   // Workers Logs ON — the channel that surfaces request/error logs.
   // Tracing: the wrangler CLI (4.98.0) does NOT yet accept an
@@ -58,6 +65,11 @@
   "env": {
     "staging": {
       "name": "sec-ex10-frontend-staging",
+      // `routes` is INHERITED when an environment does not set it. Without this
+      // empty list a staging deploy claims live-contracts.arthur.law and takes the
+      // production hostname. Staging is reachable on workers.dev only.
+      "routes": [],
+      "workers_dev": true,
       "kv_namespaces": [
         { "binding": "SESSION", "id": "b82f3dc113814af999838c4f1892e58a" }
       ],

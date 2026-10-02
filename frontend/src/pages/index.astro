@@ -20,6 +20,11 @@ const items: Ex10Summary[] = (entries ?? [])
     String(b.id).localeCompare(String(a.id)),  // UUIDv7 is time-ordered lexically
   );
 const stats = await ex10Stats();
+// Copy-paste client configuration for the public MCP endpoint (src/pages/mcp.ts).
+const MCP_CONFIG = JSON.stringify(
+  { mcpServers: { 'live-contracts': { type: 'http', url: 'https://live-contracts.arthur.law/mcp' } } },
+  null, 2,
+);
 ---
 <Base refreshSeconds={REFRESH}>
   <header class="sl-hero">
@@ -60,4 +65,23 @@ const stats = await ex10Stats();
   )}
 
   <a class="sl-tail-link" href="/agreements/1">Browse all agreements →</a>
+
+  <section class="sl-mcp" id="mcp" aria-labelledby="mcp-title">
+    <div class="sl-section-bar">
+      <span class="title" id="mcp-title">For agents · MCP</span>
+      <span class="meta">read-only · no key · 60 requests / minute</span>
+    </div>
+    <p>
+      The same feed is available to AI agents over the Model Context Protocol. Point any
+      MCP client that speaks Streamable HTTP at the endpoint below; it exposes four tools:
+      <code>search_agreements</code>, <code>list_recent_agreements</code>,
+      <code>browse_agreements</code> and <code>get_agreement</code>.
+    </p>
+    <pre class="sl-mcp-code"><code>{MCP_CONFIG}</code></pre>
+    <p class="sl-search-hint">
+      Endpoint <a href="/.well-known/mcp/server-card.json">https://live-contracts.arthur.law/mcp</a>
+      · every page also answers <code>Accept: text/markdown</code>
+      · freshness at <a href="/stats.json">/stats.json</a>
+    </p>
+  </section>
 </Base>

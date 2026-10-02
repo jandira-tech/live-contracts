@@ -155,3 +155,25 @@ export async function ex10Stats(db: DB = getDb()): Promise<Stats> {
            by_form_type: Object.fromEntries(byForm.map((r) => [r.k ?? '', r.c])),
            by_doc_type: Object.fromEntries(byDoc.map((r) => [r.k ?? '', r.c])) };
 }
+
+export interface Freshness {
+  exhibits: number;
+  latest_filed_at: string | null;    // SEC acceptance datetime "YYYYMMDDHHMMSS" (ET)
+  latest_detected_at: string | null; // RFC3339 UTC: when the producer last captured a row
+}
+
+// What GET /stats.json serves: the one number and two dates a monitor needs to tell
+// "live" from "stale". Both maxima ride an index (idx_ex_filed_at, idx_ex_detected_at).
+// Blank strings are excluded so they can never be reported as a date.
+export async function ex10Freshness(db: DB = getDb()): Promise<Freshness> {
+  const row = (await db.select({
+    n: count(),
+    filed: sql<string | null>`max(nullif(${exhibits.filedAt}, ''))`,
+    detected: sql<string | null>`max(nullif(${exhibits.detectedAt}, ''))`,
+  }).from(exhibits))[0];
+  return {
+    exhibits: row?.n ?? 0,
+    latest_filed_at: row?.filed ?? null,
+    latest_detected_at: row?.detected ?? null,
+  };
+}

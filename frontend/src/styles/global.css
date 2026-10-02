@@ -306,6 +306,13 @@ footer.site .footer-links a:hover { text-decoration: none; color: var(--text); }
 .sl-tail-link::after { content: ''; position: absolute; left: 0; bottom: 1.1rem; height: 2px; width: 100%; background: var(--accent); transform: scaleX(0); transform-origin: left; transition: transform var(--t-base); }
 .sl-tail-link:hover::after { transform: scaleX(1); }
 
+/* ---------- Home: MCP endpoint block ---------- */
+.sl-mcp { padding: 0.5rem 0 2rem; }
+.sl-mcp p { max-width: 62ch; color: var(--text-secondary); font-size: 0.9rem; line-height: 1.6; }
+.sl-mcp code { font-family: var(--font-mono); font-size: 0.8em; color: var(--text); }
+.sl-mcp-code { background: var(--surface); border: 1px solid var(--border); padding: 1rem 1.25rem; margin: 1rem 0 0.25rem; overflow-x: auto; }
+.sl-mcp-code code { font-size: 0.78rem; line-height: 1.6; }
+
 /* ---------- Search — full-width input + dark submit ---------- */
 .sl-search-row { display: flex; gap: 0; border: 1px solid var(--text); margin-top: 1.5rem; }
 .sl-search-row input { flex: 1; min-width: 0; font-family: var(--font-body); font-size: 1.25rem; padding: 1.1rem 1.4rem; background: var(--bg); border: 0; color: var(--text); letter-spacing: -0.01em; }

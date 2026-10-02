@@ -70,6 +70,22 @@ const CONFLICT_SET = {
   detectedAt: sql`coalesce(excluded.detected_at, detected_at)`,
 };
 
+// Compare the presented key to the configured one without leaking, through response
+// time, how many leading characters matched. Both sides are hashed first so the
+// comparison runs over equal-length digests whatever the caller sent.
+async function sameSecret(presented: string, expected: string): Promise<boolean> {
+  const enc = new TextEncoder();
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(presented)),
+    crypto.subtle.digest('SHA-256', enc.encode(expected)),
+  ]);
+  const x = new Uint8Array(a);
+  const y = new Uint8Array(b);
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
 const j = (o: unknown, status: number) =>
   new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -78,7 +94,7 @@ export async function POST(context: APIContext): Promise<Response> {
   // Fail closed: a missing key is a misconfiguration, not an open door.
   const key = e.SEC_API_KEY;
   if (!key) return j({ error: 'server misconfigured: SEC_API_KEY unset' }, 500);
-  if (context.request.headers.get('X-API-Key') !== key) {
+  if (!(await sameSecret(context.request.headers.get('X-API-Key') ?? '', key))) {
     return j({ error: 'invalid or missing API key' }, 401);
   }
   let body: { rows?: InRow[] };

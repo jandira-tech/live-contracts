@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { seed, testDb } from './seed';
-import { listEx10, ex10Detail, ex10Facets, ex10Search, ex10Since, ex10Stats } from '../src/lib/api';
+import { listEx10, ex10Detail, ex10Facets, ex10Search, ex10Since, ex10Stats, ex10Freshness } from '../src/lib/api';
 import { exhibits } from '../src/db/schema';
 
 let db: ReturnType<typeof testDb>;
@@ -43,4 +43,31 @@ it('ex10Since includes a fresh row and excludes the old seed rows', async () => 
   });
   const res = await ex10Since(3600, db);
   expect(res.items.map((i) => i.accession)).toEqual(['fresh']); // seed rows are months old
+});
+
+describe('ex10Freshness (GET /stats.json)', () => {
+  it('reports the row count and the newest filed_at / detected_at', async () => {
+    // Seed rows carry no detected_at (pre-enrichment producer) — it must read as null,
+    // never as an empty string that a staleness check would mistake for a date.
+    expect(await ex10Freshness(db)).toEqual({
+      exhibits: 2, latest_filed_at: '20260502120000', latest_detected_at: null,
+    });
+    await db.insert(exhibits).values([
+      { id: '3', accession: 'acc-3', filename: 'c.htm', docType: 'EX-10.1', filedAt: '20260930170000',
+        detectedAt: '2026-09-30T21:00:05+00:00', markdown: 'x' },
+      // An older filing detected later (a backfill): the two maxima are independent.
+      { id: '4', accession: 'acc-4', filename: 'd.htm', docType: 'EX-10.1', filedAt: '20260810090000',
+        detectedAt: '2026-10-02T09:00:00+00:00', markdown: 'y' },
+      // A blank filed_at must not win MAX() or be reported.
+      { id: '5', accession: 'acc-5', filename: 'e.htm', docType: 'EX-10.1', filedAt: '', markdown: 'z' },
+    ]);
+    expect(await ex10Freshness(db)).toEqual({
+      exhibits: 5, latest_filed_at: '20260930170000', latest_detected_at: '2026-10-02T09:00:00+00:00',
+    });
+  });
+
+  it('an empty table reports zero and nulls rather than throwing', async () => {
+    await db.delete(exhibits);
+    expect(await ex10Freshness(db)).toEqual({ exhibits: 0, latest_filed_at: null, latest_detected_at: null });
+  });
 });
