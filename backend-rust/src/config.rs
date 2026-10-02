@@ -1,7 +1,7 @@
 /// Environment-driven configuration with sensible defaults.
 use std::env;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Config {
     pub ingest_url: String,
     pub api_key: String,
@@ -32,6 +32,51 @@ pub struct Config {
     /// LRU capacity for the cross-feed accession dedup cache.
     /// Sized via SEC_ACCESSION_CACHE_SIZE; invalid values fall back to the default.
     pub accession_cache_size: usize,
+    /// SEC_USER_AGENT: "<Company or name> <contact email>", per SEC fair access.
+    /// Required; the producer refuses to start with a missing or placeholder one.
+    pub user_agent: String,
+    /// SQLite outbox for batches the ingest route did not accept (SEC_OUTBOX_PATH).
+    /// Mount a volume there so undelivered rows survive a restart.
+    pub outbox_path: String,
+    /// Attempts per push before the batch goes to the outbox (SEC_PUSH_RETRIES, 1..=10).
+    pub push_retries: u32,
+    /// After a 429/503 from ingest, skip pushing for this long (SEC_PUSH_COOLDOWN_SECS).
+    pub push_cooldown_secs: u64,
+}
+
+/// The SEC identity secinfra falls back to when SEC_USER_AGENT is unset.
+const PLACEHOLDER_USER_AGENT: &str = "John Smith johnsmith@gmail.com";
+
+fn redact<T>(v: &Option<T>) -> &'static str {
+    if v.is_some() { "<redacted>" } else { "None" }
+}
+
+// Hand-written so a `{cfg:?}` in a log line can never print a credential.
+impl std::fmt::Debug for Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let key = if self.api_key.is_empty() { "<unset>" } else { "<redacted>" };
+        f.debug_struct("Config")
+            .field("ingest_url", &self.ingest_url)
+            .field("api_key", &key)
+            .field("hf_token", &redact(&self.hf_token))
+            .field("image_repo", &self.image_repo)
+            .field("poll_interval_ms", &self.poll_interval_ms)
+            .field("max_rps", &self.max_rps)
+            .field("push_batch", &self.push_batch)
+            .field("concurrency", &self.concurrency)
+            .field("port", &self.port)
+            .field("convert_markdown", &self.convert_markdown)
+            .field("use_rss", &self.use_rss)
+            .field("use_efts", &self.use_efts)
+            .field("proxy", &redact(&self.proxy))
+            .field("store_path", &self.store_path)
+            .field("accession_cache_size", &self.accession_cache_size)
+            .field("user_agent", &self.user_agent)
+            .field("outbox_path", &self.outbox_path)
+            .field("push_retries", &self.push_retries)
+            .field("push_cooldown_secs", &self.push_cooldown_secs)
+            .finish()
+    }
 }
 
 impl Config {
@@ -44,6 +89,20 @@ impl Config {
     /// startup so a both-disabled env fails fast with a clear message instead of
     /// silently killing the spawned pipeline task.
     pub fn validate(&self) -> Result<(), String> {
+        if self.api_key.trim().is_empty() {
+            return Err("SEC_API_KEY is unset: every push to the ingest route would be rejected".into());
+        }
+        let ua = self.user_agent.trim();
+        let declared = ua.contains(' ')
+            && ua.contains('@')
+            && ua != PLACEHOLDER_USER_AGENT
+            && !ua.to_ascii_lowercase().contains("example.com");
+        if !declared {
+            return Err(format!(
+                "SEC_USER_AGENT must name the requester and a contact email \
+                 (SEC fair access), e.g. \"Jandira Technologies contact@arthur.law\"; got {ua:?}"
+            ));
+        }
         if !self.use_rss && !self.use_efts {
             return Err(
                 "SEC_USE_RSS and SEC_USE_EFTS are both disabled — enable at least one \
@@ -101,6 +160,17 @@ impl Config {
                 .and_then(|v| v.parse::<usize>().ok())
                 .filter(|&n| n > 0)
                 .unwrap_or(65536),
+            user_agent: get("SEC_USER_AGENT").map(|s| s.trim().to_string()).unwrap_or_default(),
+            outbox_path: get("SEC_OUTBOX_PATH")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "/data/outbox.db".into()),
+            push_retries: get("SEC_PUSH_RETRIES")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(3)
+                .clamp(1, 10),
+            push_cooldown_secs: get("SEC_PUSH_COOLDOWN_SECS")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(300),
         }
     }
 }
@@ -109,6 +179,8 @@ impl Config {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    const UA: &str = "Jandira Technologies contact@arthur.law";
 
     fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
@@ -236,12 +308,12 @@ mod tests {
         assert!(cfg.validate().is_err());
 
         // Either source on → valid.
-        let one_on = map(&[("SEC_API_KEY", "k"), ("SEC_USE_RSS", "false")]);
+        let one_on = map(&[("SEC_API_KEY", "k"), ("SEC_USER_AGENT", UA), ("SEC_USE_RSS", "false")]);
         let cfg = Config::from_map(|k| one_on.get(k).cloned());
         assert!(cfg.validate().is_ok());
 
         // Defaults (both on) → valid.
-        let defaults = map(&[("SEC_API_KEY", "k")]);
+        let defaults = map(&[("SEC_API_KEY", "k"), ("SEC_USER_AGENT", UA)]);
         let cfg = Config::from_map(|k| defaults.get(k).cloned());
         assert!(cfg.validate().is_ok());
     }
@@ -274,5 +346,78 @@ mod tests {
         let m = map(&[("SEC_API_KEY", "k"), ("SEC_ACCESSION_CACHE_SIZE", "0")]);
         let cfg = Config::from_map(|k| m.get(k).cloned());
         assert_eq!(cfg.accession_cache_size, 65536);
+    }
+
+    #[test]
+    fn validate_fails_closed_without_an_ingest_key() {
+        // A producer with no key POSTs batches the route can only reject; refuse
+        // to start instead of discovering it one 401 at a time.
+        for key in [None, Some(""), Some("   ")] {
+            let mut pairs = vec![("SEC_USER_AGENT", UA)];
+            if let Some(k) = key {
+                pairs.push(("SEC_API_KEY", k));
+            }
+            let m = map(&pairs);
+            let err = Config::from_map(|k| m.get(k).cloned()).validate().unwrap_err();
+            assert!(err.contains("SEC_API_KEY"), "{err}");
+        }
+    }
+
+    #[test]
+    fn validate_requires_a_declared_sec_identity() {
+        // SEC fair access: a User-Agent naming the requester and a contact email.
+        // secinfra's fallback ("John Smith johnsmith@gmail.com") is a placeholder.
+        for ua in [None, Some(""), Some("John Smith johnsmith@gmail.com"), Some("no-email-here"), Some("x@example.com")] {
+            let mut pairs = vec![("SEC_API_KEY", "k")];
+            if let Some(u) = ua {
+                pairs.push(("SEC_USER_AGENT", u));
+            }
+            let m = map(&pairs);
+            let err = Config::from_map(|k| m.get(k).cloned()).validate().unwrap_err();
+            assert!(err.contains("SEC_USER_AGENT"), "{ua:?}: {err}");
+        }
+        let ok = map(&[("SEC_API_KEY", "k"), ("SEC_USER_AGENT", UA)]);
+        let cfg = Config::from_map(|k| ok.get(k).cloned());
+        assert!(cfg.validate().is_ok());
+        assert_eq!(cfg.user_agent, UA);
+    }
+
+    #[test]
+    fn debug_output_redacts_credentials() {
+        let m = map(&[
+            ("SEC_API_KEY", "super-secret-key"),
+            ("HF_TOKEN", "hf_secret_token"),
+            ("SEC_PROXY", "http://user:proxypass@proxy:8080"),
+            ("SEC_USER_AGENT", UA),
+        ]);
+        let shown = format!("{:?}", Config::from_map(|k| m.get(k).cloned()));
+        for secret in ["super-secret-key", "hf_secret_token", "proxypass"] {
+            assert!(!shown.contains(secret), "{secret} leaked: {shown}");
+        }
+        assert!(shown.contains("<redacted>"));
+        assert!(shown.contains(UA), "non-secret fields stay visible");
+    }
+
+    #[test]
+    fn push_policy_defaults_and_bounds() {
+        let d = map(&[("SEC_API_KEY", "k")]);
+        let cfg = Config::from_map(|k| d.get(k).cloned());
+        assert_eq!(cfg.push_retries, 3);
+        assert_eq!(cfg.push_cooldown_secs, 300);
+        assert_eq!(cfg.outbox_path, "/data/outbox.db");
+
+        let m = map(&[
+            ("SEC_API_KEY", "k"),
+            ("SEC_PUSH_RETRIES", "99"),
+            ("SEC_PUSH_COOLDOWN_SECS", "30"),
+            ("SEC_OUTBOX_PATH", "/tmp/o.db"),
+        ]);
+        let cfg = Config::from_map(|k| m.get(k).cloned());
+        assert_eq!(cfg.push_retries, 10); // capped: a stuck endpoint must not stall the run
+        assert_eq!(cfg.push_cooldown_secs, 30);
+        assert_eq!(cfg.outbox_path, "/tmp/o.db");
+
+        let zero = map(&[("SEC_API_KEY", "k"), ("SEC_PUSH_RETRIES", "0")]);
+        assert_eq!(Config::from_map(|k| zero.get(k).cloned()).push_retries, 1);
     }
 }

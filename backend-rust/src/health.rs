@@ -3,15 +3,24 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct HealthState {
     pub total_seen: Arc<AtomicU64>,
+    /// Rows the ingest route accepted since start (direct pushes + outbox drains).
+    pub rows_accepted: Arc<AtomicU64>,
+    /// Rows waiting in the outbox at the last drain pass.
+    pub outbox_pending: Arc<AtomicU64>,
+    /// Filings skipped because processing panicked.
+    pub item_failures: Arc<AtomicU64>,
 }
 
 async fn health_handler(State(state): State<HealthState>) -> Json<Value> {
     Json(json!({
         "status": "ok",
         "total_seen": state.total_seen.load(Ordering::Relaxed),
+        "rows_accepted": state.rows_accepted.load(Ordering::Relaxed),
+        "outbox_pending": state.outbox_pending.load(Ordering::Relaxed),
+        "item_failures": state.item_failures.load(Ordering::Relaxed),
     }))
 }
 
