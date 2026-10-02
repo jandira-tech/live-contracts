@@ -27,29 +27,49 @@ PAGE = 100  # markdown bodies avg ~67KB; keep each D1 response well under its si
 FRONTEND = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
 
+def parse_wrangler_json(out: str) -> list[dict]:
+    """The result rows from `wrangler d1 execute --json`, skipping any banner text
+    before the JSON array (banners can contain brackets, e.g. "[wrangler]")."""
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(out):
+        if ch != "[":
+            continue
+        try:
+            value, _ = decoder.raw_decode(out, i)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, list) and value and isinstance(value[0], dict) and "results" in value[0]:
+            return value[0]["results"]
+    raise RuntimeError(f"no JSON result in wrangler output: {out[:200]}")
+
+
+def fetch_all(d1_fn, page: int = PAGE) -> list[dict]:
+    """Keyset-page the table by id. Ids are text (UUIDv7, plus a few legacy values),
+    so the bound is a quoted string compared as text."""
+    rows: list[dict] = []
+    last = ""
+    while True:
+        bound = last.replace("'", "''")
+        batch = d1_fn(f"SELECT * FROM exhibits WHERE id > '{bound}' ORDER BY id LIMIT {page}")
+        if not batch:
+            return rows
+        rows.extend(batch)
+        last = str(batch[-1]["id"])
+        print(f"  fetched {len(rows)}")
+
+
 def d1(sql: str) -> list[dict]:
     """Run a read query via wrangler (existing login) and return the result rows."""
     out = subprocess.run(
         ["npx", "wrangler", "d1", "execute", DB, "--remote", "--json", "--command", sql],
         capture_output=True, text=True, cwd=FRONTEND, check=True,
     ).stdout
-    start = out.find("[")  # skip any wrangler banner before the JSON payload
-    if start < 0:
-        raise RuntimeError(f"no JSON in wrangler output: {out[:200]}")
-    return json.loads(out[start:])[0]["results"]
+    return parse_wrangler_json(out)
 
 
 def main() -> None:
     token = os.environ["HF_TOKEN"]  # fail fast if missing
-    rows: list[dict] = []
-    last = 0
-    while True:
-        page = d1(f"SELECT * FROM exhibits WHERE id > {last} ORDER BY id LIMIT {PAGE}")
-        if not page:
-            break
-        rows.extend(page)
-        last = page[-1]["id"]
-        print(f"  fetched {len(rows)}")
+    rows = fetch_all(d1)
     if not rows:
         print("no rows in D1; nothing to export")
         return
