@@ -13,6 +13,7 @@ axum = "0.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
 htmd = "0.5"                # fallback converter (mature) when html2markdown yields nothing
 html2markdown = "0.2.0"     # primary: AST-to-AST converter; keeps SEC form/table layout as GFM tables
 tracing = "0.1"

@@ -11,6 +11,7 @@ mod markdown;
 mod outbox;
 mod pipeline;
 mod preflight;
+mod replay;
 mod store;
 #[cfg(test)]
 mod test_support;
@@ -231,8 +232,33 @@ fn main() {
             let checks = rt.block_on(preflight::preflight(&http_client(&cfg), &cfg, preflight::SEC_PROBE_URL));
             std::process::exit(report(&checks));
         }
+        Some("replay") => {
+            let args: Vec<String> = std::env::args().skip(2).collect();
+            let replay_args = match replay::parse_replay_args(&args) {
+                Ok(a) => a,
+                Err(e) => {
+                    eprintln!("replay: {e}\nusage: sec-ex10-rust replay --from YYYY-MM-DD --to YYYY-MM-DD [--rps 2.5] [--state /data/replay.db] [--dry-run]");
+                    std::process::exit(64);
+                }
+            };
+            if let Err(e) = cfg.validate() {
+                tracing::error!("invalid configuration: {e}");
+                std::process::exit(2);
+            }
+            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+            match rt.block_on(replay::run(&cfg, &replay_args)) {
+                Ok(t) => {
+                    println!("{t:?}");
+                    std::process::exit(0);
+                }
+                Err(e) => {
+                    tracing::error!("replay failed: {e:#}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Some(other) => {
-            eprintln!("unknown command {other:?}; expected run, smoke or preflight");
+            eprintln!("unknown command {other:?}; expected run, smoke, preflight or replay");
             std::process::exit(64);
         }
     }
