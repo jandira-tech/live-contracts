@@ -2,7 +2,7 @@
 //! that fails, park the rows in the outbox for the drain loop.
 use crate::config::Config;
 use crate::cooldown::Cooldown;
-use crate::ingest::{IngestRecord, PushOutcome, chunk_rows, push_with_budget};
+use crate::ingest::{IngestRecord, MAX_BATCH_BYTES, PushOutcome, chunk_by_size, fit_for_d1, push_with_budget};
 use crate::outbox::Outbox;
 use std::time::Duration;
 
@@ -27,8 +27,9 @@ impl Delivery<'_> {
     /// Push `rows` in ≤push_batch chunks. Returns how many D1 accepted; every row
     /// not accepted is in the outbox when this returns.
     pub async fn deliver(&self, rows: &[IngestRecord]) -> usize {
+        let rows: Vec<IngestRecord> = rows.iter().cloned().map(fit_for_d1).collect();
         let mut accepted = 0;
-        for chunk in chunk_rows(rows, self.cfg.push_batch) {
+        for chunk in chunk_by_size(&rows, self.cfg.push_batch, MAX_BATCH_BYTES) {
             match self.push(chunk).await {
                 PushOutcome::Accepted(n) => accepted += n,
                 PushOutcome::Retry { reason, .. } | PushOutcome::Rejected { reason, .. } => {
@@ -75,7 +76,17 @@ impl Delivery<'_> {
                     break;
                 }
             };
-            let (ids, rows): (Vec<i64>, Vec<IngestRecord>) = batch.into_iter().unzip();
+            // Fit rows to D1 (rows parked before this existed may be oversized), and send
+            // only as many as fit one POST; the rest wait for the next loop turn.
+            let fitted: Vec<(i64, IngestRecord)> =
+                batch.into_iter().map(|(id, r)| (id, fit_for_d1(r))).collect();
+            let take = chunk_by_size(
+                &fitted.iter().map(|(_, r)| r.clone()).collect::<Vec<_>>(),
+                self.cfg.push_batch,
+                MAX_BATCH_BYTES,
+            )[0]
+            .len();
+            let (ids, rows): (Vec<i64>, Vec<IngestRecord>) = fitted.into_iter().take(take).unzip();
             match self.push(&rows).await {
                 PushOutcome::Accepted(_) => {
                     if let Err(e) = self.outbox.ack(&ids) {
@@ -190,5 +201,31 @@ mod tests {
         let d = Delivery { client: &client, cfg: &c, outbox: &o, cooldown: &cd, backoff: Duration::from_millis(1) };
         assert_eq!(d.drain_once().await, DrainReport { delivered: 0, kept: 3 });
         assert_eq!(script.lock().unwrap().calls, 0);
+    }
+
+    #[tokio::test]
+    async fn one_oversized_exhibit_no_longer_sinks_its_neighbours() {
+        let (url, script) = ingest_server(&[]).await;
+        let (c, o, cd) = (cfg(&url, 100), Outbox::open(":memory:").unwrap(), Cooldown::new(Duration::from_secs(300)));
+        let client = reqwest::Client::new();
+        let d = Delivery { client: &client, cfg: &c, outbox: &o, cooldown: &cd, backoff: Duration::from_millis(1) };
+        let mut rs = rows(3);
+        rs[0].markdown = "x".repeat(3_700_000);
+        assert_eq!(d.deliver(&rs).await, 3);
+        assert_eq!(o.len().unwrap(), 0);
+        let _ = script;
+    }
+
+    #[tokio::test]
+    async fn drain_fits_oversized_rows_already_in_the_outbox() {
+        let (url, script) = ingest_server(&[]).await;
+        let (c, o, cd) = (cfg(&url, 100), Outbox::open(":memory:").unwrap(), Cooldown::new(Duration::from_secs(300)));
+        let mut rs = rows(2);
+        rs[1].markdown = "x".repeat(3_700_000);
+        o.put(&rs, "status 500").unwrap();
+        let client = reqwest::Client::new();
+        let d = Delivery { client: &client, cfg: &c, outbox: &o, cooldown: &cd, backoff: Duration::from_millis(1) };
+        assert_eq!(d.drain_once().await, DrainReport { delivered: 2, kept: 0 });
+        let _ = script;
     }
 }

@@ -20,8 +20,10 @@ async fn handler(State(s): State<Shared>, headers: HeaderMap, Json(body): Json<V
     let mut s = s.lock().unwrap();
     s.calls += 1;
     s.keys.push(headers.get("x-api-key").and_then(|v| v.to_str().ok()).unwrap_or("").to_string());
-    let status = s.statuses.pop_front().unwrap_or(200);
     let rows = body["rows"].as_array().cloned().unwrap_or_default();
+    // Like D1: a row over 2,000,000 bytes fails the whole (atomic) batch with a 500.
+    let oversized = rows.iter().any(|r| r["markdown"].as_str().map_or(0, str::len) > 2_000_000);
+    let status = if oversized { 500 } else { s.statuses.pop_front().unwrap_or(200) };
     if status == 200 {
         s.rows_seen += rows.len();
         let ids: Vec<Value> = rows.iter().map(|r| r["id"].clone()).collect();
@@ -41,7 +43,9 @@ pub async fn ingest_server(statuses: &[u16]) -> (String, Shared) {
     let shared: Shared = Arc::new(Mutex::new(Script { statuses: statuses.iter().copied().collect(), ..Default::default() }));
     let app = Router::new()
         .route("/api/ingest", post(handler))
-        .route("/sec", axum::routing::get(sec)).with_state(shared.clone());
+        .route("/sec", axum::routing::get(sec))
+        // The Worker accepts large bodies; the per-row limit is D1's, modelled above.
+        .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)).with_state(shared.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
