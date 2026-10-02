@@ -1,0 +1,87 @@
+---
+import Base from '../layouts/Base.astro';
+import DocketRow from '../components/DocketRow.astro';
+import { getLiveCollection } from 'astro:content';
+import { ex10Stats, type Ex10Summary } from '../lib/api';
+
+// Live, request-time: the latest agreements regardless of when they were filed
+// (NOT a 60s window — the feed must never sit empty between filings). Page
+// auto-refreshes every REFRESH seconds so new contracts appear on their own.
+const LIMIT = 100;
+const REFRESH = 60;
+const { entries, error } = await getLiveCollection('agreements', { pageSize: LIMIT });
+// getLiveCollection re-sorts entries by id; force newest-by-filing-time first
+// (filed_at is the SEC acceptance time; fall back to capture time until backfilled).
+const items: Ex10Summary[] = (entries ?? [])
+  .map((e) => e.data as Ex10Summary)
+  .sort((a, b) =>
+    (b.filed_at ?? '').localeCompare(a.filed_at ?? '') ||
+    (b.found_at ?? '').localeCompare(a.found_at ?? '') ||
+    String(b.id).localeCompare(String(a.id)),  // UUIDv7 is time-ordered lexically
+  );
+const stats = await ex10Stats();
+// Copy-paste client configuration for the public MCP endpoint (src/pages/mcp.ts).
+const MCP_CONFIG = JSON.stringify(
+  { mcpServers: { 'live-contracts': { type: 'http', url: 'https://live-contracts.arthur.law/mcp' } } },
+  null, 2,
+);
+---
+<Base refreshSeconds={REFRESH}>
+  <header class="sl-hero">
+    <div class="sl-hero-main">
+      <div class="sl-hero-eyebrow">
+        <span class="pulse"></span>
+        <span>LIVE</span>
+      </div>
+      <h1>New material contract exhibits, the moment they hit SEC EDGAR.</h1>
+      <p class="lede">Live Contracts surfaces traditional EX-10 material contracts — credit agreements, employment terms, license deals, indemnification forms — extracted from public SEC filings in near real time. No login. No paywall. Just the documents.</p>
+      <hr class="divider" />
+    </div>
+    <aside class="sl-hero-stats">
+      <div class="sl-hero-stat">
+        <span class="num">{stats.total.toLocaleString()}</span>
+        <span class="label">Total agreements</span>
+      </div>
+      <div class="sl-hero-stat">
+        <span class="num">{stats.last_24h.toLocaleString()}</span>
+        <span class="label">Filed in last 24h</span>
+      </div>
+    </aside>
+  </header>
+
+  <div class="sl-section-bar">
+    <span class="title">Latest agreements</span>
+    <span class="meta">{items.length} most recent · refreshes every {REFRESH}s</span>
+  </div>
+
+  {error ? (
+    <div class="empty">The live feed is temporarily unavailable. Retrying on next refresh…</div>
+  ) : items.length === 0 ? (
+    <div class="empty">No agreements yet. Watching the wire…</div>
+  ) : (
+    <section class="sl-feed">
+      {items.map((item) => <DocketRow item={item} />)}
+    </section>
+  )}
+
+  <a class="sl-tail-link" href="/agreements/1">Browse all agreements →</a>
+
+  <section class="sl-mcp" id="mcp" aria-labelledby="mcp-title">
+    <div class="sl-section-bar">
+      <span class="title" id="mcp-title">For agents · MCP</span>
+      <span class="meta">read-only · no key · 60 requests / minute</span>
+    </div>
+    <p>
+      The same feed is available to AI agents over the Model Context Protocol. Point any
+      MCP client that speaks Streamable HTTP at the endpoint below; it exposes four tools:
+      <code>search_agreements</code>, <code>list_recent_agreements</code>,
+      <code>browse_agreements</code> and <code>get_agreement</code>.
+    </p>
+    <pre class="sl-mcp-code"><code>{MCP_CONFIG}</code></pre>
+    <p class="sl-search-hint">
+      Endpoint <a href="/.well-known/mcp/server-card.json">https://live-contracts.arthur.law/mcp</a>
+      · every page also answers <code>Accept: text/markdown</code>
+      · freshness at <a href="/stats.json">/stats.json</a>
+    </p>
+  </section>
+</Base>

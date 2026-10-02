@@ -39,6 +39,16 @@ services:
       - RUST_LOG=${RUST_LOG:-info}
       - HF_TOKEN=${HF_TOKEN:-}
       - SEC_IMAGE_REPO=${SEC_IMAGE_REPO:-arthrod/sec-ex10-exhibits}
+      # SEC fair access: name the requester and a contact email. Required; the
+      # producer refuses to start with a missing or placeholder identity.
+      - SEC_USER_AGENT=${SEC_USER_AGENT:?set SEC_USER_AGENT, e.g. "Jandira Technologies contact@arthur.law"}
+      # Rows the ingest route did not accept wait here and are retried every
+      # minute. On the volume below so they survive a redeploy.
+      - SEC_OUTBOX_PATH=${SEC_OUTBOX_PATH:-/data/outbox.db}
+      - SEC_PUSH_RETRIES=${SEC_PUSH_RETRIES:-3}
+      - SEC_PUSH_COOLDOWN_SECS=${SEC_PUSH_COOLDOWN_SECS:-300}
+    volumes:
+      - sec-ex10-data:/data
     # Published to loopback so your existing host cloudflared reaches it at
     # http://localhost:${HOST_PORT}. (If your tunnel runs as a container instead,
     # drop this and attach both to a shared Docker network, routing the tunnel at
@@ -65,3 +75,6 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+
+volumes:
+  sec-ex10-data:
