@@ -10,7 +10,9 @@ listener (see `../../COMPARISON_REPORT.md`).
 ```bash
 cd deploy/rust
 cp .env.example .env
-# Edit .env — at minimum set SEC_API_KEY (and HF_TOKEN if you want image capture).
+# Edit .env — at minimum set SEC_API_KEY and SEC_USER_AGENT (and HF_TOKEN if you
+# want image capture).
+docker compose run --rm sec-ex10-rust sec-ex10-rust preflight   # proves key + identity
 docker compose up -d --build
 docker compose logs -f          # watch it discover + ingest
 ```
@@ -38,16 +40,46 @@ sed -i "s|^SEC_API_KEY=.*|SEC_API_KEY=$KEY|" .env
 Verify it's alive:
 
 ```bash
-curl -s http://localhost:7860/health      # {"status":"ok","total_seen":N}
+curl -s http://localhost:7860/health
+# {"status":"ok","total_seen":N,"rows_accepted":N,"outbox_pending":N,"item_failures":N}
 ```
 
-`total_seen` is the number of EX-10-bearing filings processed since start.
+`total_seen` is the number of EX-10-bearing filings processed since start,
+`rows_accepted` the rows D1 took, `outbox_pending` the rows waiting for a retry,
+and `item_failures` the filings skipped because processing panicked.
+
+## Commands
+
+| Command | What it does |
+|---------|--------------|
+| `sec-ex10-rust` (or `run`) | the producer |
+| `sec-ex10-rust smoke` | offline: config is valid, outbox opens. Exit 1 on any failure |
+| `sec-ex10-rust preflight` | smoke, plus an empty authenticated POST to the ingest route (proves the key, writes nothing) and one SEC request with the declared User-Agent |
+
+## Delivery: nothing is dropped
+
+A batch the ingest route does not accept is not lost. Each push gets
+`SEC_PUSH_RETRIES` attempts (default 3, backoff 2 s then 4 s) for transport
+errors, 408 and 5xx. A 401/400 is not retried. A 429 or 503 starts a
+`SEC_PUSH_COOLDOWN_SECS` cooldown (default 300) during which the endpoint is not
+called. Whatever is still undelivered goes to the SQLite outbox at
+`SEC_OUTBOX_PATH` (default `/data/outbox.db`, on the `sec-ex10-data` volume),
+and a drain loop retries it oldest-first every minute. After fixing a wrong key,
+the backlog drains by itself. One filing that panics is logged, counted in
+`item_failures` and skipped; the rest of the batch carries on.
+
+The producer refuses to start (exit 2) without `SEC_API_KEY`, without a
+declared `SEC_USER_AGENT`, or when the outbox cannot be opened. `Debug` output
+of the configuration redacts the key, the HF token and the proxy URL.
 
 ## Required keys
 
 | Key | Required | Purpose |
 |-----|----------|---------|
 | `SEC_API_KEY` | **yes** | `X-API-Key` for the ingest route — POSTs are rejected without the matching key |
+| `SEC_USER_AGENT` | **yes** | SEC fair access: requester name and contact email, e.g. `Jandira Technologies contact@arthur.law` |
+| `SEC_OUTBOX_PATH` | optional (default `/data/outbox.db`) | durable queue for undelivered rows |
+| `SEC_PUSH_RETRIES`, `SEC_PUSH_COOLDOWN_SECS` | optional (3, 300) | push retry budget and cooldown after 429/503 |
 | `D1_INGEST_URL` | yes (has prod default) | where finalized rows are POSTed |
 | `HF_TOKEN` | optional | enables scanned-exhibit image capture → HF dataset; blank = skip |
 | `SEC_USE_RSS` / `SEC_USE_EFTS` | optional (default `true`) | discovery sources; keep both on |

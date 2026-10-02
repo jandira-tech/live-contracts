@@ -1,22 +1,38 @@
 mod classify;
 mod config;
+mod cooldown;
+mod delivery;
 mod extract;
 mod header;
 mod health;
 mod images;
 mod ingest;
 mod markdown;
+mod outbox;
 mod pipeline;
+mod preflight;
 mod store;
+#[cfg(test)]
+mod test_support;
 
 use config::Config;
+use cooldown::Cooldown;
+use delivery::{Delivery, PUSH_BACKOFF};
 use health::HealthState;
+use outbox::Outbox;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
-async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) {
-    let ua = secinfra::sec_user_agent();
-    let mut builder = reqwest::Client::builder().user_agent(&ua);
+/// How often the outbox is retried.
+const DRAIN_EVERY: Duration = Duration::from_secs(60);
+
+fn http_client(cfg: &Config) -> reqwest::Client {
+    // secinfra's discovery requests read SEC_USER_AGENT themselves; validate()
+    // has already refused to start without a real one.
+    let mut builder = reqwest::Client::builder()
+        .user_agent(&cfg.user_agent)
+        .timeout(Duration::from_secs(120));
     if let Some(proxy_url) = cfg.proxy.as_deref() {
         match reqwest::Proxy::all(proxy_url) {
             Ok(p) => {
@@ -26,7 +42,35 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
             Err(e) => tracing::error!("invalid SEC_PROXY {proxy_url:?}: {e}; ignoring"),
         }
     }
-    let client = builder.build().expect("reqwest client");
+    builder.build().expect("reqwest client")
+}
+
+struct Shared {
+    outbox: Arc<Outbox>,
+    cooldown: Arc<Cooldown>,
+}
+
+async fn drain_loop(client: reqwest::Client, cfg: Config, shared: Arc<Shared>, state: HealthState) {
+    loop {
+        let d = Delivery {
+            client: &client,
+            cfg: &cfg,
+            outbox: &shared.outbox,
+            cooldown: &shared.cooldown,
+            backoff: PUSH_BACKOFF,
+        };
+        let r = d.drain_once().await;
+        state.outbox_pending.store(r.kept as u64, Ordering::Relaxed);
+        state.rows_accepted.fetch_add(r.delivered as u64, Ordering::Relaxed);
+        if r.delivered > 0 || r.kept > 0 {
+            tracing::info!("outbox drain: {} delivered, {} still queued", r.delivered, r.kept);
+        }
+        tokio::time::sleep(DRAIN_EVERY).await;
+    }
+}
+
+async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>, shared: Arc<Shared>) {
+    let client = http_client(&cfg);
 
     // Mimic datamule: RSS (fast, lossy) + EFTS (slower, sweeps up RSS's misses).
     // Both default on via Config; either can be disabled with SEC_USE_RSS /
@@ -77,6 +121,7 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
                 let id_counter = id_counter.clone();
                 let store = store.clone();
                 let fetch_gate = fetch_gate.clone();
+                let shared = shared.clone();
                 async move {
                     let accession = sub.accession;
                     let form = sub.submission_type.clone();
@@ -95,7 +140,17 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
                         *last = Some(std::time::Instant::now());
                     }
 
-                    let p = pipeline::process_submission(&client, &cfg, &id_counter, &sub).await;
+                    // One bad filing must not take the batch down with it.
+                    let label = format!("filing {accession}");
+                    let Some(p) = preflight::isolate(
+                        &label,
+                        pipeline::process_submission(&client, &cfg, &id_counter, &sub),
+                    )
+                    .await
+                    else {
+                        state.item_failures.fetch_add(1, Ordering::Relaxed);
+                        return;
+                    };
                     if p.is_empty() {
                         return;
                     }
@@ -134,22 +189,22 @@ async fn run(cfg: Config, state: HealthState, store: Option<Arc<store::Store>>) 
                             p.accession
                         );
                     } else {
-                        // Stateless mode: POST EX-10 records straight to /api/ingest.
+                        // Stateless mode: POST EX-10 records to /api/ingest; whatever
+                        // is not accepted waits in the outbox for the drain loop.
                         if p.ex10.is_empty() {
                             return;
                         }
                         state.total_seen.fetch_add(1, Ordering::Relaxed);
-                        let chunks = ingest::chunk_rows(&p.ex10, cfg.push_batch);
-                        for chunk in chunks {
-                            let n = ingest::post_batch(
-                                &client,
-                                &cfg.ingest_url,
-                                &cfg.api_key,
-                                chunk,
-                            )
-                            .await;
-                            tracing::info!("ingested {n} records for {accession}");
-                        }
+                        let d = Delivery {
+                            client: &client,
+                            cfg: &cfg,
+                            outbox: &shared.outbox,
+                            cooldown: &shared.cooldown,
+                            backoff: PUSH_BACKOFF,
+                        };
+                        let n = d.deliver(&p.ex10).await;
+                        state.rows_accepted.fetch_add(n as u64, Ordering::Relaxed);
+                        tracing::info!("ingested {n} of {} records for {accession}", p.ex10.len());
                     }
                 }
             })
@@ -168,8 +223,22 @@ fn main() {
         .init();
 
     let cfg = Config::from_env();
-    // Fail fast on an unusable discovery config rather than panicking the spawned
-    // pipeline task (secinfra::Monitor::build asserts at least one source on).
+    match std::env::args().nth(1).as_deref() {
+        None | Some("run") => {}
+        Some("smoke") => std::process::exit(report(&preflight::smoke(&cfg))),
+        Some("preflight") => {
+            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+            let checks = rt.block_on(preflight::preflight(&http_client(&cfg), &cfg, preflight::SEC_PROBE_URL));
+            std::process::exit(report(&checks));
+        }
+        Some(other) => {
+            eprintln!("unknown command {other:?}; expected run, smoke or preflight");
+            std::process::exit(64);
+        }
+    }
+    // Fail closed: no key, no declared SEC identity, or no discovery source
+    // means no useful work, so refuse to start (secinfra::Monitor::build would
+    // also panic the spawned pipeline task on the last one).
     if let Err(e) = cfg.validate() {
         tracing::error!("invalid configuration: {e}");
         std::process::exit(2);
@@ -195,10 +264,19 @@ fn main() {
         None => None,
     };
 
-    let total_seen = Arc::new(AtomicU64::new(0));
-    let state = HealthState {
-        total_seen: total_seen.clone(),
+    let outbox = match Outbox::open(&cfg.outbox_path) {
+        Ok(o) => Arc::new(o),
+        Err(e) => {
+            tracing::error!("cannot open outbox at {}: {e}", cfg.outbox_path);
+            std::process::exit(2);
+        }
     };
+    let shared = Arc::new(Shared {
+        outbox,
+        cooldown: Arc::new(Cooldown::new(Duration::from_secs(cfg.push_cooldown_secs))),
+    });
+
+    let state = HealthState::default();
 
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     rt.block_on(async {
@@ -211,11 +289,13 @@ fn main() {
             health::serve(health_port, health_state).await;
         });
 
+        let drain = tokio::spawn(drain_loop(http_client(&cfg), cfg.clone(), shared.clone(), state.clone()));
+
         // Pipeline (with restart loop)
         let pipeline = tokio::spawn(async move {
             loop {
                 tracing::info!("pipeline starting");
-                run(cfg2.clone(), state.clone(), store.clone()).await;
+                run(cfg2.clone(), state.clone(), store.clone(), shared.clone()).await;
                 tracing::warn!("pipeline exited, restarting in 5s");
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
             }
@@ -225,6 +305,15 @@ fn main() {
         tokio::signal::ctrl_c().await.expect("ctrl_c");
         tracing::info!("shutting down");
         health.abort();
+        drain.abort();
         pipeline.abort();
     });
+}
+
+/// Print checks one per line; exit code 0 when all pass, 1 otherwise.
+fn report(checks: &[preflight::Check]) -> i32 {
+    for c in checks {
+        println!("{} {:<7} {}", if c.ok { "ok  " } else { "FAIL" }, c.name, c.detail);
+    }
+    i32::from(!checks.iter().all(|c| c.ok))
 }

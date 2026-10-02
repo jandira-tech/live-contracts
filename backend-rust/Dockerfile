@@ -20,6 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /app/target/release/sec-ex10-rust /usr/local/bin/sec-ex10-rust
 
+# Outbox volume mount point, owned by the runtime user.
+RUN mkdir -p /data && chown 1000:1000 /data
+
 ENV PORT=7860
 ENV RUST_LOG=info
 
