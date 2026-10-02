@@ -1,0 +1,25 @@
+# Fails (and GitHub emails the repo admins) when Live Contracts stops landing
+# new exhibits: /stats.json latest_detected_at older than two business days.
+name: freshness
+
+on:
+  schedule:
+    - cron: "17 14 * * 1-5" # 14:17 UTC on weekdays, mid-morning in New York
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --quiet pytest && python -m pytest -q scripts/tests/test_check_freshness.py
+      - run: python scripts/check_freshness.py
