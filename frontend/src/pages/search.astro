@@ -19,15 +19,15 @@ const qs = (p: number) => `/search?q=${encodeURIComponent(q)}&page=${p}`;
 Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
 ---
 <Base title={q ? `Search: ${q}` : 'Search EX-10 agreements'}>
-  <header class="sl-hero">
-    <div class="sl-hero-eyebrow"><span>SEARCH</span></div>
-    <h1>Search agreements</h1>
-    <p class="lede">Live full-text search across every EX-10 material contract.</p>
-    <form method="get" action="/search" class="sl-search-row">
-      <input type="search" name="q" value={q} placeholder="Search agreements, parties, terms…" autofocus aria-label="Search" />
+  <header class="sl-hero is-simple">
+    <div class="sl-hero-eyebrow rise"><span class="sq" aria-hidden="true"></span><span>/ Search</span></div>
+    <h1 class="rise d1">Search <span class="mark">agreements</span></h1>
+    <p class="lede rise d2">Live full-text search across every EX-10 material contract.</p>
+    <form method="get" action="/search" class="sl-search-row rise d3" role="search">
+      <input type="search" name="q" value={q} placeholder="Search agreements, parties, terms…" autofocus aria-label="Search" autocomplete="off" />
       <button type="submit">Search</button>
     </form>
-    <div class="sl-search-hint">Press enter to search · matches description &amp; full markdown text</div>
+    <div class="sl-search-hint">Press enter to search · matches description and full markdown text</div>
   </header>
 
   {result && (

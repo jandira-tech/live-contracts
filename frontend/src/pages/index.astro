@@ -29,15 +29,20 @@ const MCP_CONFIG = JSON.stringify(
 <Base refreshSeconds={REFRESH}>
   <header class="sl-hero">
     <div class="sl-hero-main">
-      <div class="sl-hero-eyebrow">
-        <span class="pulse"></span>
-        <span>LIVE</span>
+      <div class="sl-hero-eyebrow rise">
+        <span class="pulse" aria-hidden="true"></span>
+        <span>/ Live</span>
+        <span class="sep">·</span>
+        <span>SEC EDGAR · EX-10</span>
       </div>
-      <h1>New material contract exhibits, the moment they hit SEC EDGAR.</h1>
-      <p class="lede">Live Contracts surfaces traditional EX-10 material contracts — credit agreements, employment terms, license deals, indemnification forms — extracted from public SEC filings in near real time. No login. No paywall. Just the documents.</p>
-      <hr class="divider" />
+      <h1 class="rise d1">New material contract exhibits, <span class="mark">the moment they hit</span> SEC EDGAR.</h1>
+      <p class="lede rise d2">Live Contracts surfaces traditional EX-10 material contracts — credit agreements, employment terms, license deals, indemnification forms — extracted from public SEC filings in near real time. No login. No paywall. Just the documents.</p>
+      <div class="sl-hero-actions rise d3">
+        <a class="btn" href="/agreements/1">Browse all <span class="arr" aria-hidden="true">→</span></a>
+        <a class="btn ghost" href="/search">Search <span class="arr" aria-hidden="true">→</span></a>
+      </div>
     </div>
-    <aside class="sl-hero-stats">
+    <aside class="sl-hero-stats rise d2" aria-label="Feed statistics">
       <div class="sl-hero-stat">
         <span class="num">{stats.total.toLocaleString()}</span>
         <span class="label">Total agreements</span>
@@ -50,7 +55,7 @@ const MCP_CONFIG = JSON.stringify(
   </header>
 
   <div class="sl-section-bar">
-    <span class="title">Latest agreements</span>
+    <span class="title">/ Latest agreements</span>
     <span class="meta">{items.length} most recent · refreshes every {REFRESH}s</span>
   </div>
 
@@ -64,11 +69,19 @@ const MCP_CONFIG = JSON.stringify(
     </section>
   )}
 
-  <a class="sl-tail-link" href="/agreements/1">Browse all agreements →</a>
+  <a class="sl-tail-link" href="/agreements/1">Browse all agreements <span class="arr" aria-hidden="true">→</span></a>
+
+  <section class="cta" aria-labelledby="cta-title">
+    <div>
+      <h2 id="cta-title">Let's get rid of that problem nobody wants to solve.</h2>
+      <p>Teams whose work now touches product, data and AI — fractional general counsel, legal-AI advisory and implementation.</p>
+    </div>
+    <a class="btn ondark" href="https://arthur.law/contact/">Contact <span class="arr" aria-hidden="true">→</span></a>
+  </section>
 
   <section class="sl-mcp" id="mcp" aria-labelledby="mcp-title">
     <div class="sl-section-bar">
-      <span class="title" id="mcp-title">For agents · MCP</span>
+      <span class="title" id="mcp-title">/ For agents · MCP</span>
       <span class="meta">read-only · no key · 60 requests / minute</span>
     </div>
     <p>
@@ -79,9 +92,38 @@ const MCP_CONFIG = JSON.stringify(
     </p>
     <pre class="sl-mcp-code"><code>{MCP_CONFIG}</code></pre>
     <p class="sl-search-hint">
-      Endpoint <a href="/.well-known/mcp/server-card.json">https://live-contracts.arthur.law/mcp</a>
+      Endpoint <a href="/.well-known/mcp/server-card.json"><code>https://live-contracts.arthur.law/mcp</code></a>
       · every page also answers <code>Accept: text/markdown</code>
       · freshness at <a href="/stats.json">/stats.json</a>
     </p>
   </section>
+  <script is:inline define:vars={{ REFRESH }}>
+    // Live feed without a full reload: every REFRESH seconds, fetch this page,
+    // diff the card ids, and insert the new ones at the top with the flash
+    // animation. Scroll position, text selection and the A/A+ choice survive.
+    (function () {
+      var feed = document.querySelector('.sl-feed');
+      if (!feed || !('fetch' in window) || !('DOMParser' in window)) return;
+      var meta = document.querySelector('.sl-section-bar .meta');
+      var busy = false;
+      function ids() { return Array.prototype.map.call(feed.querySelectorAll('.sl-doc'), function (a) { return a.getAttribute('data-id'); }); }
+      async function tick() {
+        if (busy || document.hidden) return;
+        busy = true;
+        try {
+          var res = await fetch(location.pathname, { headers: { accept: 'text/html' }, cache: 'no-store' });
+          if (!res.ok) return;
+          var doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+          var have = ids();
+          var fresh = Array.prototype.filter.call(doc.querySelectorAll('.sl-feed .sl-doc'), function (a) { return have.indexOf(a.getAttribute('data-id')) < 0; });
+          for (var i = fresh.length - 1; i >= 0; i--) { var n = document.importNode(fresh[i], true); n.classList.add('is-new'); feed.insertBefore(n, feed.firstChild); }
+          var stats = doc.querySelectorAll('.sl-hero-stat .num'); var mine = document.querySelectorAll('.sl-hero-stat .num');
+          for (var j = 0; j < stats.length && j < mine.length; j++) mine[j].textContent = stats[j].textContent;
+          if (meta && fresh.length) meta.textContent = feed.querySelectorAll('.sl-doc').length + ' most recent · refreshes every ' + REFRESH + 's';
+        } catch (e) { /* next tick */ } finally { busy = false; }
+      }
+      setInterval(tick, REFRESH * 1000);
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) tick(); });
+    })();
+  </script>
 </Base>

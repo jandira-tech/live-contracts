@@ -8,7 +8,7 @@
 import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
 import { exhibits } from '../db/schema';
 import { getDb, type DB } from '../db/client';
-import { rowToSummary, parseFiling, parseImageUrls } from './summary';
+import { rowToSummary, parseFiling, parseImageUrls, ftsQuery } from './summary';
 
 export interface FilingHeader {
   company_name?: string;
@@ -43,6 +43,7 @@ export interface Ex10Summary {
   items?: string[];
   filed_at?: string; // SEC acceptance datetime "YYYYMMDDHHMMSS" (ET); "" until backfilled
   image_urls?: string[]; // HF-dataset URLs for scanned (image-only) exhibits; [] otherwise
+  snippet?: string;      // search hit context from FTS5 snippet(); <mark> wraps the matched terms
 }
 
 export interface Ex10Detail extends Ex10Summary {
@@ -79,6 +80,7 @@ export interface Stats {
 
 export interface SearchResult extends PageResult {
   query: string;
+  engine: 'fts' | 'like';
 }
 
 // substr keeps list payloads light (markdown bodies avg ~67KB).
@@ -132,15 +134,36 @@ export async function ex10Detail(id: string, db: DB = getDb()): Promise<Ex10Deta
            filing: parseFiling(row.filingMetadata) as FilingHeader, image_urls: parseImageUrls(row.imageUrls) };
 }
 
+// Search runs on the FTS5 index (migration 0003) so no query ever scans 19k
+// markdown bodies; `snippet()` gives the card its hit context with the matched
+// terms wrapped in <mark>. The LIKE path survives only as a fallback for a
+// database that predates the index (a local dev DB before `db:fts-backfill`).
 export async function ex10Search(query: string, page = 1, pageSize = 20, db: DB = getDb()): Promise<SearchResult> {
   const q = (query ?? '').trim();
-  if (!q) return { query: '', items: [], total: 0, page, page_size: pageSize, total_pages: 0 };
+  if (!q) return { query: '', engine: 'fts', items: [], total: 0, page, page_size: pageSize, total_pages: 0 };
+  const match = ftsQuery(q);
+  try {
+    const fts = sql`exhibits_fts`;
+    const total = (await db.select({ n: count() }).from(fts).where(sql`${fts} MATCH ${match}`))[0]?.n ?? 0;
+    const rows = await db.select({
+      ...summaryCols,
+      snippet: sql<string>`snippet(exhibits_fts, 2, '<mark>', '</mark>', '…', 28)`,
+    }).from(fts)
+      .innerJoin(exhibits, sql`${exhibits.id} = exhibits_fts.id`)
+      .where(sql`${fts} MATCH ${match}`)
+      .orderBy(...orderNewest)
+      .limit(pageSize).offset((page - 1) * pageSize);
+    const items = rows.map((r) => ({ ...rowToSummary(r), snippet: r.snippet ?? '' }));
+    return { query: q, engine: 'fts', items, total, page, page_size: pageSize, total_pages: pages(total, pageSize) };
+  } catch (e) {
+    if (!/no such table: exhibits_fts/i.test(String(e))) throw e;
+  }
   const like = `%${q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
   const cond = sql`(${exhibits.description} LIKE ${like} ESCAPE '\\' COLLATE NOCASE OR ${exhibits.markdown} LIKE ${like} ESCAPE '\\' COLLATE NOCASE)`;
   const total = (await db.select({ n: count() }).from(exhibits).where(cond))[0]?.n ?? 0;
   const rows = await db.select(summaryCols).from(exhibits).where(cond).orderBy(...orderNewest)
     .limit(pageSize).offset((page - 1) * pageSize);
-  return { query: q, items: rows.map(rowToSummary), total, page, page_size: pageSize, total_pages: pages(total, pageSize) };
+  return { query: q, engine: 'like', items: rows.map(rowToSummary), total, page, page_size: pageSize, total_pages: pages(total, pageSize) };
 }
 
 export async function ex10Stats(db: DB = getDb()): Promise<Stats> {

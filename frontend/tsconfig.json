@@ -5,7 +5,8 @@
   },
   "include": [".astro/types.d.ts", "**/*"],
   // `test/` is type-checked by Vitest (vitest.config.ts) with the Workers pool,
-  // which provides the virtual `cloudflare:test` module. `astro check` validates
-  // the app, not the test harness, so it's excluded here.
-  "exclude": ["dist", "test"]
+  // which provides the virtual `cloudflare:test` module. `scripts/` are operator
+  // scripts that run under Bun (Bun.spawn, import.meta.dir). `astro check`
+  // validates the app, not those harnesses, so both are excluded here.
+  "exclude": ["dist", "test", "scripts"]
 }

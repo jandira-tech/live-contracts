@@ -16,9 +16,12 @@ export async function seed() {
   // across this file's beforeEach hooks. Drop it first to re-apply migrations
   // and re-insert fixtures from a clean slate on every test.
   await (env as any).DB.exec('DROP TABLE IF EXISTS exhibits');
+  await (env as any).DB.exec('DROP TABLE IF EXISTS exhibits_fts');
   for (const key of Object.keys(migrations).sort()) {
     for (const stmt of migrations[key].split('--> statement-breakpoint')) {
-      const s = stmt.trim();
+      // Drop `--` comment lines first: exec() joins lines with spaces, so a leading
+      // comment would otherwise swallow the whole statement.
+      const s = stmt.replace(/^\s*--.*$/gm, '').trim();
       if (s) await (env as any).DB.exec(s.replace(/\n/g, ' '));
     }
   }

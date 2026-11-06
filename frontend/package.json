@@ -4,16 +4,19 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "bun run scripts/setup-local-db.ts && astro dev",
+    "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
     "sync": "astro sync",
     "test:fonts": "node test/fonts.mjs",
+    "test:design": "node test/design-system.mjs",
     "test:smoke": "node test/smoke.mjs",
     "test:unit": "vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:setup": "bun run scripts/setup-local-db.ts"
+    "db:setup": "bun run scripts/seed-local-d1.ts",
+    "db:fts-backfill": "bun run scripts/fts-backfill.ts",
+    "db:migrate": "wrangler d1 migrations apply sec-ex10 --remote"
   },
   "dependencies": {
     "@astrojs/cloudflare": "^14.1.0",
@@ -21,12 +24,16 @@
     "drizzle-orm": "^0.45.2",
     "marked": "^18.0.5"
   },
-  "trustedDependencies": ["esbuild", "workerd", "sharp", "@cloudflare/workerd-linux-64"],
+  "trustedDependencies": [
+    "esbuild",
+    "workerd",
+    "sharp",
+    "@cloudflare/workerd-linux-64"
+  ],
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@cloudflare/vitest-pool-workers": "^0.17.0",
     "@cloudflare/workers-types": "^4.20241127.0",
-    "better-sqlite3": "^11.7.0",
     "drizzle-kit": "^0.31.10",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"

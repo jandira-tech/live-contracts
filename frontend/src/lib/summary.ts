@@ -44,7 +44,7 @@ const LEADING_EXHIBIT = /^[ \t]*(?:#{1,6}[ \t]*)?\**[ \t]*(?:exhibit|ex)\b[ \t.\
 // (markers intact), cleaned of the noise above and cut on a block boundary so
 // marked never sees a half-open marker/table. Rendered by marked, same as the
 // detail page — no hand-rolled clause splitting or quote-bolding.
-export function markdownExcerpt(md: string | null | undefined, limit = 1100): string {
+export function markdownExcerpt(md: string | null | undefined, limit = 1600): string {
   let s = stripMdHead(md);
   if (!s) return '';
   s = s.replace(MD_IMAGE, '').replace(/\[\]\([^)]*\)/g, ''); // images + emptied links
@@ -55,7 +55,10 @@ export function markdownExcerpt(md: string | null | undefined, limit = 1100): st
   const cut = s.slice(0, limit);
   const para = cut.lastIndexOf('\n\n');
   const line = cut.lastIndexOf('\n');
-  const b = para > limit * 0.4 ? para : line > limit * 0.4 ? line : limit;
+  // Back off to a block boundary only when it is near the cap; otherwise cut at
+  // the last word so the card is not trimmed to a short opening paragraph.
+  const word = cut.lastIndexOf(' ');
+  const b = para > limit * 0.55 ? para : line > limit * 0.55 ? line : word > limit * 0.55 ? word : limit;
   return s.slice(0, b).trimEnd() + '\n\n…';
 }
 
@@ -86,4 +89,111 @@ export function rowToSummary(r: Partial<ExhibitRow>): Ex10Summary {
     filed_at: r.filedAt ?? String(filing.filed_at ?? ''),
     image_urls: parseImageUrls(r.imageUrls ?? null),
   };
+}
+
+
+// ---------------------------------------------------------------------------
+// Card headline. The SEC `description` is usually just the exhibit label
+// ("EX-10.1", "EXHIBIT 10.34"); the real title is the first heading-like line
+// of the markdown. Pure functions, unit-tested in test/summary.test.ts.
+// ---------------------------------------------------------------------------
+const LABEL_ONLY = /^\s*(?:(?:exhibit|ex)[\s.\-]*\d+(?:\.\d+)?[a-z]?)?\s*$/i;
+export function isLabelOnly(description: string | null | undefined): boolean {
+  return LABEL_ONLY.test(description ?? '');
+}
+
+const TITLE_WORDS = /\b(AGREEMENT|AMENDMENT|NOTE|LEASE|WARRANT|INDENTURE|GUARANTY|GUARANTEE|PLAN|LETTER|CONSENT|WAIVER|RELEASE|CERTIFICATE|LICENSE|SUBLEASE|ASSIGNMENT|JOINDER|SUPPLEMENT|TERMS|CONTRACT|ARRANGEMENT|DEED|UNDERTAKING|OFFER|MEMORANDUM|SCHEDULE)\b/i;
+const TITLE_CUT = /\s*(?:\(|“|"|dated|made|entered|is made|by and|between|among|this|has not)\b.*$/i;
+const SMALL = new Set(['of', 'and', 'the', 'to', 'for', 'in', 'by', 'or', 'a', 'an', 'as', 'at', 'on', 'with']);
+function titleCase(s: string): string {
+  return s.toLowerCase().split(/\s+/).map((w, i) => {
+    if (i > 0 && SMALL.has(w)) return w;
+    if (/^\d/.test(w)) return w;
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }).join(' ');
+}
+
+/** Visible text of a markdown slice: no markers, rules, comments or images. */
+export function textContent(md: string | null | undefined): string {
+  if (!md) return '';
+  return md
+    .replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ')
+    .replace(MD_IMAGE, ' ').replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[*_`#>|]+/g, '').replace(/\s+/g, ' ').trim();
+}
+
+const DANGLING = /\b(?:to|of|and|the|for|dated|between|among|&|a|an|by)$/i;
+const SENTENCE = /\b(?:is|are|has|was|were|hereby|made|entered|shall|agrees?)\b/i;
+const CORP = /\b(?:inc|llc|l\.?p|corp|corporation|company|co|ltd|plc|n\.?a)\.?,?$/i;
+const DATE_LINE = /^(?:(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4})$/i;
+const GENERIC = /^(?:agreement|amendment|note|plan|letter|contract|exhibit)$/i;
+
+export function displayTitle(description: string | null | undefined, markdown: string | null | undefined, max = 90): string {
+  const desc = (description ?? '').trim();
+  if (!isLabelOnly(desc)) return desc === desc.toUpperCase() && desc.split(/\s+/).length > 2 ? titleCase(desc) : desc;
+  const fallback = desc || 'EX-10';
+  let body = stripMdHead(markdown).replace(MD_IMAGE, '');
+  for (let i = 0; i < 3 && LEADING_EXHIBIT.test(body); i++) body = body.replace(LEADING_EXHIBIT, '');
+  const raw = body.split('\n').map((l) => textContent(l)).filter(Boolean).slice(0, 14);
+  // Re-join a heading that wrapped after a preposition ("NINTH AMENDMENT TO" / "CREDIT AGREEMENT").
+  const lines: string[] = [];
+  for (const l of raw) {
+    const prev = lines[lines.length - 1];
+    if (prev && DANGLING.test(prev) && prev.length + l.length < max) lines[lines.length - 1] = `${prev} ${l}`;
+    else lines.push(l);
+  }
+  const clean = (t: string) => titleCase(t.replace(/[.:;,]+$/, '').trim());
+  const standalone = (l: string) => l.length <= max && !DANGLING.test(l) && !SENTENCE.test(l) && !/^(?:this|the)\b/i.test(l);
+  // 1) a short standalone line that names the instrument ("CREDIT AGREEMENT").
+  for (const l of lines) {
+    if (standalone(l) && TITLE_WORDS.test(l) && !GENERIC.test(l)) return clean(l);
+  }
+  // 2) a letter agreement's subject line.
+  for (const l of lines) {
+    const m = l.match(/^re:\s*(.{3,})$/i);
+    if (m && m[1].length <= max) return `Re: ${clean(m[1])}`;
+  }
+  // 3) an inline opener ("THIS CONTRACTOR SERVICES AGREEMENT (the ...) is made ...").
+  for (const l of lines) {
+    const m = l.match(/^(?:this\s+)?([A-Z][A-Z0-9 .,&'\-/]{3,}?\b(?:AGREEMENT|NOTE|LEASE|WARRANT|PLAN|LETTER|AMENDMENT|INDENTURE|GUARANTY)\b)/i);
+    if (m) {
+      const t = m[1].replace(TITLE_CUT, '').trim();
+      if (t.length >= 8 && t.length <= max && t === t.toUpperCase() && !GENERIC.test(t) && !DANGLING.test(t)) return titleCase(t);
+    }
+  }
+  // 4) first heading-like line that is not a sentence, a date, or a party name.
+  const first = lines.find((l) => l.length >= 4 && standalone(l) && !/[.!?]\s/.test(l) && !DATE_LINE.test(l) && !CORP.test(l) && !/^dear\b/i.test(l));
+  return first ? clean(first) : fallback;
+}
+
+// ---------------------------------------------------------------------------
+// Image-only exhibits: the markdown carries `![](name.jpg)` refs relative to the
+// EDGAR filing folder. Resolve them so the detail page shows the pages instead
+// of eighteen broken images.
+// ---------------------------------------------------------------------------
+const REL_IMG = /!\[([^\]]*)\]\((?!https?:|data:|\/)([^)\s]+)(\s+"[^"]*")?\)/g;
+export function resolveEdgarImages(md: string | null | undefined, filingUrl: string | null | undefined): string {
+  if (!md) return '';
+  const u = (filingUrl ?? '').trim();
+  if (!u) return md;
+  const base = u.replace(/[?#].*$/, '').replace(/\/[^/]*$/, '/');
+  return md.replace(REL_IMG, (_, alt, src, title) => `![${alt}](${base}${src}${title ?? ''})`);
+}
+
+// ---------------------------------------------------------------------------
+// FTS5 query: every user token is quoted so operators (AND, OR, NOT, *, ^, :)
+// are literal; a quoted phrase in the input stays a phrase.
+// ---------------------------------------------------------------------------
+export function ftsQuery(input: string | null | undefined): string {
+  const s = (input ?? '').trim();
+  if (!s) return '';
+  const parts: string[] = [];
+  const re = /"([^"]+)"|(\S+)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    const raw = (m[1] ?? m[2]).replace(/"/g, '').replace(/[*^:()]/g, ' ').trim();
+    if (raw) parts.push(`"${raw}"`);
+  }
+  return parts.join(' ');
 }

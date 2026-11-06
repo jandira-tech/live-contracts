@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { seed, testDb } from './seed';
 import { listEx10, ex10Detail, ex10Facets, ex10Search, ex10Since, ex10Stats, ex10Freshness } from '../src/lib/api';
 import { exhibits } from '../src/db/schema';
+import { eq } from 'drizzle-orm';
 
 let db: ReturnType<typeof testDb>;
 beforeEach(async () => { await seed(); db = testDb(); });
@@ -25,8 +26,24 @@ it('ex10Detail: full markdown + parsed filing + images', async () => {
 });
 it('ex10Detail: null for missing id', async () => { expect(await ex10Detail('999', db)).toBeNull(); });
 it('ex10Search: matches body, newest first; empty query → none', async () => {
-  expect((await ex10Search('leasing', 1, 20, db)).items[0].id).toBe('2');
+  const r = await ex10Search('leasing', 1, 20, db);
+  expect(r.engine).toBe('fts');
+  expect(r.total).toBe(2);
+  expect(r.items[0].id).toBe('2');
+  expect(r.items[0].snippet).toContain('<mark>leasing</mark>');
   expect((await ex10Search('   ', 1, 20, db)).total).toBe(0);
+});
+it('ex10Search: FTS operators in user input are literal, phrases stay phrases', async () => {
+  expect((await ex10Search('leasing OR *', 1, 20, db)).total).toBe(0);
+  expect((await ex10Search('"contract body"', 1, 20, db)).items.map((i) => i.id)).toEqual(['1']);
+  expect((await ex10Search('"body contract"', 1, 20, db)).total).toBe(0);
+});
+it('ex10Search: the index follows inserts and updates through the triggers', async () => {
+  await db.insert(exhibits).values({ id: '9', accession: 'acc-9', filename: 'z.htm', description: 'Zeta', markdown: 'unique zebra clause' });
+  expect((await ex10Search('zebra', 1, 20, db)).items.map((i) => i.id)).toEqual(['9']);
+  await db.update(exhibits).set({ markdown: 'now a giraffe clause' }).where(eq(exhibits.id, '9'));
+  expect((await ex10Search('zebra', 1, 20, db)).total).toBe(0);
+  expect((await ex10Search('giraffe', 1, 20, db)).total).toBe(1);
 });
 it('ex10Facets / ex10Stats', async () => {
   const f = await ex10Facets(db);

@@ -133,3 +133,92 @@ describe('rowToSummary: excerpt vs excerpt_md', () => {
     expect(summary.excerpt_md).toBe('');
   });
 });
+// ---------------------------------------------------------------------------
+// Card headline: 94 of 100 live rows carry a label-only SEC description
+// ("EX-10.1", "EXHIBIT 10.1"); the real title lives in the markdown.
+// ---------------------------------------------------------------------------
+import { displayTitle, isLabelOnly, textContent, resolveEdgarImages, ftsQuery } from '../src/lib/summary';
+
+describe('isLabelOnly', () => {
+  it('recognises SEC exhibit labels in every spelling', () => {
+    for (const s of ['EX-10.1', 'EXHIBIT 10.1', 'Exhibit 10.34', 'ex10.2', 'EX-10', 'EX 10.1', '']) expect(isLabelOnly(s)).toBe(true);
+  });
+  it('keeps a real description', () => {
+    expect(isLabelOnly('Material Commercial Agreement')).toBe(false);
+    expect(isLabelOnly('EX-10.1 Credit Agreement')).toBe(false);
+  });
+});
+
+describe('displayTitle', () => {
+  it('keeps a real description untouched', () => {
+    expect(displayTitle('Supply Agreement', '# Something else')).toBe('Supply Agreement');
+  });
+  it('lifts the agreement title out of the markdown when the description is a label', () => {
+    const md = 'Execution Version ANNOVIS BIO, INC. 19,000,000 Shares of Common Stock\n\nUNDERWRITING AGREEMENT\n\nNovember 5, 2026';
+    expect(displayTitle('EXHIBIT 10.1', md)).toBe('Underwriting Agreement');
+  });
+  it('takes the title from the first sentence when it is inline', () => {
+    const md = '**THIS CONTRACTOR SERVICES AGREEMENT **(“ Agreement ”) is made as of August 14, 2026 BETWEEN: PROFOUND MEDICAL CORP.';
+    expect(displayTitle('EX-10.3', md)).toBe('Contractor Services Agreement');
+  });
+  it('handles amendments and notes', () => {
+    expect(displayTitle('EX-10.1', 'EXECUTION VERSION\n\nAMENDMENT NO. 3\n\nDated as of November 5, 2026 to AMENDED AND RESTATED CREDIT AGREEMENT')).toBe('Amendment No. 3');
+    expect(displayTitle('EXHIBIT 10.1', 'PROMISSORY NOTE\n\nTHIS UNSECURED PROMISSORY NOTE (THIS “ NOTE ”) HAS NOT BEEN REGISTERED')).toBe('Promissory Note');
+  });
+  it('skips the repeated exhibit label and falls back to the label when nothing fits', () => {
+    expect(displayTitle('EX-10.2', 'Exhibit 10.2\n\nMUTUAL SEPARATION AGREEMENT\n\nTHIS MUTUAL SEPARATION AGREEMENT')).toBe('Mutual Separation Agreement');
+    expect(displayTitle('EX-10.1', '---\n<!-- a.jpg -->\n---')).toBe('EX-10.1');
+    expect(displayTitle('EX-10.1', '')).toBe('EX-10.1');
+  });
+  it('joins a heading that wraps after a preposition', () => {
+    expect(displayTitle('EX-10.1', 'NINTH AMENDMENT TO\nCREDIT AGREEMENT\n\nThis Ninth Amendment')).toBe('Ninth Amendment to Credit Agreement');
+  });
+  it('prefers a Re: line in a letter agreement', () => {
+    expect(displayTitle('EX-10.10', 'September 28, 2026\n\nOliver Reeves\n\nRe: Separation from Employment\n\nDear Oliver:')).toBe('Re: Separation From Employment');
+    expect(displayTitle('EX-10.1', 'Vaxart, Inc.\n\nNovember 3, 2026\n\nDear Sam,\n\nThe purpose of this letter is to')).not.toBe('Vaxart, Inc.');
+  });
+  it('does not accept a sentence fragment or a bare generic word', () => {
+    expect(displayTitle('EX-10.1', 'The purpose of\nthis letter is to confirm. Reference is hereby made to the Agreement.')).toBe('EX-10.1');
+    expect(displayTitle('EX-10.2', 'AGREEMENT\n\nTHIS SECURITIES PURCHASE AGREEMENT (this “Agreement”) is dated')).toBe('Securities Purchase Agreement');
+  });
+  it('title-cases a shouted real description', () => {
+    expect(displayTitle('AMENDMENT TO MANAGEMENT AGREEMENT', '')).toBe('Amendment to Management Agreement');
+    expect(displayTitle('EX-10.1 Credit Agreement', '')).toBe('EX-10.1 Credit Agreement');
+  });
+  it('caps a runaway first line', () => {
+    expect(displayTitle('EX-10.1', 'word '.repeat(60)).length).toBeLessThanOrEqual(90);
+  });
+});
+
+describe('textContent', () => {
+  it('returns the visible text of a markdown slice, ignoring hr/comments/images', () => {
+    expect(textContent('<hr>\n<!-- a.jpg --><hr>\n')).toBe('');
+    expect(textContent('---\n\n![](a.jpg)\n\n***')).toBe('');
+    expect(textContent('# Title\n\nBody **bold**.')).toBe('Title Body bold.');
+  });
+});
+
+describe('resolveEdgarImages', () => {
+  const url = 'https://www.sec.gov/Archives/edgar/data/1388658/000138865826000094/0001388658-26-000094.txt';
+  it('rewrites relative image refs to the filing folder', () => {
+    expect(resolveEdgarImages('![](irhythm-001.jpg "slide1")', url))
+      .toBe('![](https://www.sec.gov/Archives/edgar/data/1388658/000138865826000094/irhythm-001.jpg "slide1")');
+  });
+  it('leaves absolute refs and non-image markdown alone', () => {
+    expect(resolveEdgarImages('![x](https://hf/a.png) [link](foo.htm)', url)).toBe('![x](https://hf/a.png) [link](foo.htm)');
+  });
+  it('is a no-op without a filing url', () => {
+    expect(resolveEdgarImages('![](a.jpg)', '')).toBe('![](a.jpg)');
+  });
+});
+
+describe('ftsQuery', () => {
+  it('quotes every token so FTS5 operators in user input are literal', () => {
+    expect(ftsQuery('credit agreement')).toBe('"credit" "agreement"');
+    expect(ftsQuery('  AND  "x" OR* ')).toBe('"AND" "x" "OR"');
+    expect(ftsQuery('')).toBe('');
+  });
+  it('keeps a quoted phrase together', () => {
+    expect(ftsQuery('"change of control" severance')).toBe('"change of control" "severance"');
+  });
+});

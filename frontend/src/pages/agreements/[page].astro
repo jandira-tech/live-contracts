@@ -45,15 +45,16 @@ const filtered = Boolean(form || cik || filer);
 Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
 ---
 <Base title={`Browse EX-10 agreements${form ? ` · ${form}` : ''}`}>
-  <header class="sl-hero">
-    <div class="sl-hero-eyebrow"><span>BROWSE</span><span class="sep">·</span><span>page {pageParam} of {lastPage}</span></div>
-    <h1>Browse EX-10 agreements</h1>
-    <p class="lede">{(result.total ?? 0).toLocaleString()} {filtered ? 'matching' : 'total'} material contract exhibits.</p>
-    <hr class="divider" />
+  <header class="sl-hero is-simple">
+    <div class="sl-hero-eyebrow rise"><span class="sq" aria-hidden="true"></span><span>/ Browse</span><span class="sep">·</span><span>page <strong>{pageParam}</strong> of <strong>{lastPage}</strong></span></div>
+    <h1 class="rise d1">Browse <span class="mark">EX-10</span> agreements</h1>
+    <p class="lede rise d2"><strong>{(result.total ?? 0).toLocaleString()}</strong> {filtered ? 'matching' : 'total'} material contract exhibits.</p>
   </header>
 
   <div class="sl-browse-layout">
-    <aside class="sl-filters-col">
+    <details class="sl-filters-col" open>
+      <summary class="sl-filters-toggle">Filters{filtered ? ' · on' : ''}</summary>
+      <div class="sl-filters-body">
       <div class="sl-filters">
         <h4>Sort</h4>
         <ul>
@@ -75,15 +76,23 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-rev
       <div class="sl-filters">
         <h4>Filer / CIK</h4>
         <form method="get" action="/agreements/1" class="sl-filter-search">
-          <input type="search" name="filer" value={filer} placeholder="Company name" aria-label="Filer name" />
-          <input type="search" name="cik" value={cik} placeholder="CIK" aria-label="CIK" />
+          <input type="search" name="filer" value={filer} placeholder="Company name" aria-label="Filer name" autocomplete="organization" />
+          <input type="search" name="cik" value={cik} placeholder="CIK" aria-label="CIK" inputmode="numeric" />
           {form ? <input type="hidden" name="form" value={form} /> : null}
           {sort === 'oldest' ? <input type="hidden" name="sort" value="oldest" /> : null}
           <button type="submit">Apply</button>
           {filtered ? <a class="sl-filter-clear" href="/agreements/1">Clear filters</a> : null}
         </form>
       </div>
-    </aside>
+      </div>
+    </details>
+    <script is:inline define:vars={{ filtered }}>
+      // Phones: start with the filter rail collapsed unless a filter is active.
+      // Desktop keeps it open (the summary is hidden there by CSS).
+      if (!filtered && window.matchMedia('(max-width: 760px)').matches) {
+        var d = document.querySelector('.sl-filters-col'); if (d) d.open = false;
+      }
+    </script>
 
     <div>
       {result.items.length === 0 ? (

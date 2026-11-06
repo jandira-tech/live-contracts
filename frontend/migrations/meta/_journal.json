@@ -22,6 +22,13 @@
       "when": 1780697670697,
       "tag": "0002_boring_union_jack",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793937177414,
+      "tag": "0003_exhibits_fts",
+      "breakpoints": true
     }
   ]
 }

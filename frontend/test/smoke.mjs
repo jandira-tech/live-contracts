@@ -23,11 +23,12 @@ async function check(name, path, ...needles) {
   }
 }
 
-await check('homepage live banner', '/', 'last 60 seconds', 'LIVE');
-await check('archive pagination', '/agreements/1', 'All EX-10 agreements', 'class="pagination"');
+await check('homepage live feed', '/', '/ Live contracts', '/ Latest agreements', 'class="sl-feed"');
+await check('navbar wordmark', '/', 'href="https://arthur.law/"', 'ARTHUR<i>.</i>SOUZA<i>.</i>RODRIGUES', 'class="mbar"');
+await check('archive pagination', '/agreements/1', 'agreements</h1>', 'class="pagination"', 'class="sl-filters-col"');
 await check('detail markdown shell', '/agreement/103', 'class="prose"', 'View original filing');
-await check('search page form', '/search', 'Search agreements', 'class="search-form"');
-await check('search results', '/search?q=agreement', 'results for', 'class="card"');
+await check('search page form', '/search', 'class="sl-search-row', 'role="search"');
+await check('search results', '/search?q=agreement', 'results for', 'class="sl-doc"');
 
 if (failures) {
   console.error(`\n${failures} smoke check(s) failed`);

@@ -16,6 +16,7 @@ const {
 
 // Active nav state from the current path.
 const path = Astro.url.pathname;
+const isHome = path === '/';
 const isBrowse = path.startsWith('/agreement'); // /agreements/* and /agreement/*
 const isSearch = path.startsWith('/search');
 ---
@@ -26,51 +27,98 @@ const isSearch = path.startsWith('/search');
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
-    {refreshSeconds ? <meta http-equiv="refresh" content={String(refreshSeconds)} /> : null}
+    {/* Without JS the page still refreshes itself; with JS, index.astro polls and
+        inserts new rows in place so scroll position survives. */}
+    {refreshSeconds ? <noscript><meta http-equiv="refresh" content={String(refreshSeconds)} /></noscript> : null}
     <title>{title}</title>
     <!-- Canonical brand fonts are self-hosted (see global.css @font-face); preload
          the two variable woff2 so first paint isn't blocked on CSS discovery. -->
     <link rel="preload" href="/fonts/libre-franklin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/roboto-mono.woff2" as="font" type="font/woff2" crossorigin />
+    <script is:inline>
+      // Text-size preference (A / A+), applied before first paint to avoid a flash.
+      try { var s = localStorage.getItem('asr-size'); if (s === 'large') document.documentElement.dataset.size = 'large'; } catch (e) {}
+    </script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23FAFAF8'/><rect x='3' y='3' width='5' height='5' fill='%23FFD400'/></svg>" />
   </head>
   <body>
-    <nav class="sl-nav">
-      <div class="sl-nav-inner">
-        <a class="sl-wordmark" href="/"><span class="pulse"></span>LIVECONTRACTS</a>
-        <ul class="sl-nav-links">
-          <li><a class="sl-nav-link" href="https://arthur.law" target="_blank" rel="noopener">ABOUT ME</a></li>
-          <li><a class:list={['sl-nav-link', { 'is-active': isBrowse }]} href="/agreements/1">BROWSE</a></li>
-          <li><a class:list={['sl-nav-link', { 'is-active': isSearch }]} href="/search">SEARCH</a></li>
-        </ul>
+    <header class="hdr">
+      <div class="wrap">
+        <div class="brand">
+          <a class="wm" href="https://arthur.law/">ARTHUR<i>.</i>SOUZA<i>.</i>RODRIGUES</a>
+          <a class:list={['sub', 'mono', { 'is-current': isHome }]} href="/">/ Live contracts</a>
+        </div>
+        <div class="hright">
+          <ul class="nav-links">
+            <li><a class:list={[{ 'is-current': isHome }]} href="/"><span class="live" aria-hidden="true"></span>Live</a></li>
+            <li><a class:list={[{ 'is-current': isBrowse }]} href="/agreements/1">Browse</a></li>
+            <li><a class:list={[{ 'is-current': isSearch }]} href="/search">Search</a></li>
+            <li><a class="nav-contact" href="https://arthur.law/contact/">Contact →</a></li>
+          </ul>
+          <div class="sizes" aria-label="Text size">
+            <button type="button" data-size="normal" class="on" title="Default text size">A</button>
+            <button type="button" data-size="large" title="Larger text">A+</button>
+          </div>
+        </div>
       </div>
-    </nav>
+    </header>
     <main class="container">
       <slot />
     </main>
-    <footer class="site">
-      <div class="container">
-        <p>
-          Material contract (EX-10) exhibits extracted from SEC EDGAR in near real time.
-          Data is public SEC filing information. Not legal or investment advice.
-          <span class="footer-strong">NOT AFFILIATED WITH THE SEC.</span>
-        </p>
-        <p class="footer-fine">
-          Attorney advertising. This website is for general informational purposes and does not
-          create an attorney-client relationship. Legal services are provided only after conflict
-          checks, engagement terms, and jurisdictional scope are confirmed. Prior results do not
-          guarantee a similar outcome.
-        </p>
-        <div class="footer-meta">
-          <span>© MMXXVI ARTHUR SOUZA RODRIGUES · NEW YORK · SÃO PAULO</span>
-          <nav class="footer-links" aria-label="Social links">
+    <footer class="ftr">
+      <div class="wrap">
+        <div class="foot-top">
+          <div>
+            <div class="wm">A<i>.</i>S<i>.</i>R</div>
+            <div class="c">© MMXXVI · New York · São Paulo</div>
+          </div>
+          <nav class="foot-social" aria-label="Social links">
+            <a href="https://arthur.law/">arthur.law</a>
+            <a href="https://arthur.law/contact/">Contact</a>
             <a href="https://huggingface.co/arthrod" target="_blank" rel="noopener noreferrer">HF</a>
             <a href="https://www.linkedin.com/in/arthrod" target="_blank" rel="noopener noreferrer">LI</a>
             <a href="https://github.com/arthrod" target="_blank" rel="noopener noreferrer">GH</a>
           </nav>
         </div>
+        <p class="disclaimer">
+          Material contract (EX-10) exhibits extracted from SEC EDGAR in near real time.
+          Data is public SEC filing information. Not legal or investment advice.
+          <strong>Not affiliated with the SEC.</strong>
+        </p>
+        <p class="disclaimer">
+          <strong>Attorney advertising.</strong> This website is for general informational purposes and does not
+          create an attorney-client relationship. Legal services are provided only after conflict
+          checks, engagement terms, and jurisdictional scope are confirmed. Prior results do not
+          guarantee a similar outcome.
+        </p>
       </div>
     </footer>
+    <nav class="mbar" aria-label="Primary">
+      <a class:list={[{ 'is-current': isHome }]} href="/"><b></b>Live</a>
+      <a class:list={[{ 'is-current': isBrowse }]} href="/agreements/1"><b></b>Browse</a>
+      <a class:list={[{ 'is-current': isSearch }]} href="/search"><b></b>Search</a>
+    </nav>
+    <script is:inline>
+      // Text-size toggle: same control and storage shape as prompting-for-attorneys.
+      (function () {
+        var KEY = 'asr-size';
+        var btns = document.querySelectorAll('.sizes button');
+        function apply(s) {
+          if (s === 'large') document.documentElement.dataset.size = 'large';
+          else delete document.documentElement.dataset.size;
+          btns.forEach(function (b) { b.classList.toggle('on', b.dataset.size === s); });
+        }
+        var saved = 'normal';
+        try { saved = localStorage.getItem(KEY) || 'normal'; } catch (e) {}
+        apply(saved);
+        btns.forEach(function (b) {
+          b.addEventListener('click', function () {
+            try { localStorage.setItem(KEY, b.dataset.size); } catch (e) {}
+            apply(b.dataset.size);
+          });
+        });
+      })();
+    </script>
     <script is:inline>
       // WebMCP (experimental) — expose read-only contract tools to in-browser
       // agents. Feature-detected; reuses the same /mcp endpoint as the remote

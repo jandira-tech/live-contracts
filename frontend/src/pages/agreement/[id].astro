@@ -3,7 +3,7 @@ import Base from '../../layouts/Base.astro';
 import { getLiveEntry } from 'astro:content';
 import type { Ex10Detail } from '../../lib/api';
 import { formatNY, formatYmd } from '../../lib/time';
-import { stripMdHead } from '../../lib/summary';
+import { stripMdHead, resolveEdgarImages, displayTitle } from '../../lib/summary';
 import { marked } from 'marked';
 
 // Live SSR via Live Content Collections: fetched at request time by id. No
@@ -16,8 +16,9 @@ if (error || !detail) {
   return Astro.redirect('/404');
 }
 
-const html = detail.markdown ? marked.parse(stripMdHead(detail.markdown)) : '';
-const title = detail.description?.trim() || `${detail.doc_type} — ${detail.filename}`;
+// Relative image refs (image-only exhibits) resolve against the EDGAR filing folder.
+const html = detail.markdown ? marked.parse(resolveEdgarImages(stripMdHead(detail.markdown), detail.filing_url)) : '';
+const title = displayTitle(detail.description, detail.markdown) || `${detail.doc_type} — ${detail.filename}`;
 const images = detail.image_urls ?? [];
 
 // One-click hand-off to Cicero: pass just the exhibit id. Cicero reads the
@@ -27,13 +28,12 @@ const ciceroUrl = detail.markdown
   ? `https://cicero.im/editor?importEx10=${detail.id}`
   : null;
 const f = detail.filing ?? {};
-const hasFiling = Boolean(f.company_name || f.period || f.file_number || (f.items?.length));
 
 Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
 ---
 <Base title={title} description={`EX-10 material contract: ${title}`}>
-  <header class="sl-hero">
-    <div class="sl-hero-eyebrow">
+  <header class="sl-hero is-simple is-doc">
+    <div class="sl-hero-eyebrow rise">
       <span class="sl-ex-tag">{detail.doc_type}</span>
       <span>{detail.form_type}</span>
       <span class="sep">·</span>
@@ -41,49 +41,60 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=300, stale-while-re
       <span class="sep">·</span>
       <span>{detail.accession}</span>
     </div>
-    <h1>{title}</h1>
-    <p class="lede">
+    <h1 class="rise d1">{title}</h1>
+    <p class="lede rise d2">
       <a href={detail.filing_url} rel="noopener" target="_blank">View original filing on SEC EDGAR →</a>
       &nbsp;·&nbsp; seen {formatNY(detail.found_at)}
     </p>
-    {ciceroUrl && (
-      <p class="sl-export">
-        <a class="sl-cicero-pill" href={ciceroUrl} target="_blank" rel="noopener">Export to Cicero →</a>
-      </p>
-    )}
-    <hr class="divider" />
   </header>
 
-  {hasFiling && (
-    <section class="filing-details">
-      <h2>FILING DETAILS</h2>
+  <div class="p-body">
+    <div class="p-main">
+      {images.length > 0 ? (
+        <section class="sl-gallery">
+          <h2>/ Scanned exhibit · {images.length} page{images.length === 1 ? '' : 's'}</h2>
+          {images.map((src, i) => <img src={src} alt={`Page ${i + 1}`} loading="lazy" />)}
+        </section>
+      ) : (
+        <article class="prose">
+          {html ? <Fragment set:html={html} /> : <p class="empty">Markdown for this exhibit is still being generated.</p>}
+        </article>
+      )}
+    </div>
+    <aside class="p-aside" aria-label="Filing details">
       <dl>
-        {f.company_name ? <><dt>Filer</dt><dd>{f.company_name}</dd></> : null}
-        {f.period ? <><dt>Period of report</dt><dd>{formatYmd(f.period)}</dd></> : null}
-        {f.filing_date ? <><dt>Filed</dt><dd>{formatYmd(f.filing_date)}</dd></> : null}
-        {f.file_number ? <><dt>SEC file no.</dt><dd>{f.file_number}</dd></> : null}
-        {f.state_of_incorporation ? <><dt>State of inc.</dt><dd>{f.state_of_incorporation}</dd></> : null}
-        {f.sic ? <><dt>SIC</dt><dd>{f.sic}</dd></> : null}
-        {f.location ? <><dt>Location</dt><dd>{f.location}</dd></> : null}
+        {f.company_name ? <div><dt>Filer</dt><dd>{f.company_name}</dd></div> : null}
+        <div><dt>Form · exhibit</dt><dd>{detail.form_type} · {detail.doc_type}</dd></div>
+        {f.filing_date ? <div><dt>Filed</dt><dd>{formatYmd(f.filing_date)}</dd></div> : null}
+        {f.period ? <div><dt>Period of report</dt><dd>{formatYmd(f.period)}</dd></div> : null}
+        <div><dt>CIK · accession</dt><dd>{detail.cik} · {detail.accession}</dd></div>
+        {f.file_number ? <div><dt>SEC file no.</dt><dd>{f.file_number}</dd></div> : null}
+        {f.state_of_incorporation ? <div><dt>State of inc.</dt><dd>{f.state_of_incorporation}</dd></div> : null}
+        {f.sic ? <div><dt>SIC</dt><dd>{f.sic}</dd></div> : null}
+        {f.location ? <div><dt>Location</dt><dd>{f.location}</dd></div> : null}
+        {f.items?.length ? <div><dt>Form items</dt><dd><ul class="items">{f.items.map((it) => <li>{it}</li>)}</ul></dd></div> : null}
       </dl>
-      {f.items?.length ? (
-        <ul class="items">
-          {f.items.map((it) => <li>{it}</li>)}
-        </ul>
-      ) : null}
-    </section>
-  )}
+      <div class="rule"></div>
+      <div class="links">
+        {ciceroUrl && <a href={ciceroUrl} target="_blank" rel="noopener">Export to Cicero <span class="arr" aria-hidden="true">→</span></a>}
+        <a href={detail.filing_url} target="_blank" rel="noopener">SEC EDGAR filing <span class="arr" aria-hidden="true">→</span></a>
+        {detail.markdown && <a href={`/agreement/${detail.id}`} type="text/markdown" data-markdown>Markdown <span class="arr" aria-hidden="true">→</span></a>}
+      </div>
+    </aside>
+  </div>
 
-  {images.length > 0 ? (
-    <section class="sl-gallery">
-      <h2>SCANNED EXHIBIT · {images.length} PAGE{images.length === 1 ? '' : 'S'}</h2>
-      {images.map((src, i) => <img src={src} alt={`Page ${i + 1}`} loading="lazy" />)}
-    </section>
-  ) : (
-    <article class="prose">
-      {html ? <Fragment set:html={html} /> : <p class="empty">Markdown for this exhibit is still being generated.</p>}
-    </article>
-  )}
-
-  <a class="sl-tail-link" href="/agreements/1">← Back to all agreements</a>
+  <a class="sl-tail-link" href="/agreements/1"><span class="arr" aria-hidden="true">←</span> Back to all agreements</a>
+  <script is:inline>
+    // "Markdown →" fetches the same URL with Accept: text/markdown and opens it as text.
+    document.querySelectorAll('a[data-markdown]').forEach(function (a) {
+      a.addEventListener('click', async function (e) {
+        e.preventDefault();
+        try {
+          var r = await fetch(a.getAttribute('href'), { headers: { accept: 'text/markdown' } });
+          var blob = new Blob([await r.text()], { type: 'text/plain;charset=utf-8' });
+          window.open(URL.createObjectURL(blob), '_blank');
+        } catch (err) { location.href = a.getAttribute('href'); }
+      });
+    });
+  </script>
 </Base>
