@@ -19,7 +19,9 @@ const items: Ex10Summary[] = (entries ?? [])
     (b.found_at ?? '').localeCompare(a.found_at ?? '') ||
     String(b.id).localeCompare(String(a.id)),  // UUIDv7 is time-ordered lexically
   );
-const stats = await ex10Stats();
+// Stats are a second D1 round trip. If that aggregate fails, still render the
+// feed — an uncaught throw here is an empty 500 from Cloudflare.
+const stats = await ex10Stats().catch(() => null);
 // Copy-paste client configuration for the public MCP endpoint (src/pages/mcp.ts).
 const MCP_CONFIG = JSON.stringify(
   { mcpServers: { 'live-contracts': { type: 'http', url: 'https://live-contracts.arthur.law/mcp' } } },
@@ -42,6 +44,7 @@ const MCP_CONFIG = JSON.stringify(
         <a class="btn ghost" href="/search">Search <span class="arr" aria-hidden="true">→</span></a>
       </div>
     </div>
+    {stats ? (
     <aside class="sl-hero-stats rise d2" aria-label="Feed statistics">
       <div class="sl-hero-stat">
         <span class="num">{stats.total.toLocaleString()}</span>
@@ -52,6 +55,7 @@ const MCP_CONFIG = JSON.stringify(
         <span class="label">Filed in last 24h</span>
       </div>
     </aside>
+    ) : null}
   </header>
 
   <div class="sl-section-bar">

@@ -5,10 +5,10 @@
  * `getDb()` — so the live loaders/pages call them unchanged, while tests
  * inject a seeded test database.
  */
-import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
-import { exhibits } from '../db/schema';
-import { getDb, type DB } from '../db/client';
-import { rowToSummary, parseFiling, parseImageUrls, ftsQuery } from './summary';
+import { and, asc, count, desc, eq, sql } from "drizzle-orm";
+import { exhibits } from "../db/schema";
+import { getDb, type DB } from "../db/client";
+import { rowToSummary, parseFiling, parseImageUrls, ftsQuery } from "./summary";
 
 export interface FilingHeader {
   company_name?: string;
@@ -33,8 +33,8 @@ export interface Ex10Summary {
   filing_url: string;
   found_at: string;
   markdown_status: string;
-  excerpt: string;       // plaintext (markdown stripped) — for agent/MCP text endpoints
-  excerpt_md: string;    // leading markdown slice — rendered by marked on the cards
+  excerpt: string; // plaintext (markdown stripped) — for agent/MCP text endpoints
+  excerpt_md: string; // leading markdown slice — rendered by marked on the cards
   has_markdown: boolean;
   // Compact filing-header fields for card footers.
   company_name?: string;
@@ -43,7 +43,7 @@ export interface Ex10Summary {
   items?: string[];
   filed_at?: string; // SEC acceptance datetime "YYYYMMDDHHMMSS" (ET); "" until backfilled
   image_urls?: string[]; // HF-dataset URLs for scanned (image-only) exhibits; [] otherwise
-  snippet?: string;      // search hit context from FTS5 snippet(); <mark> wraps the matched terms
+  snippet?: string; // search hit context from FTS5 snippet(); <mark> wraps the matched terms
 }
 
 export interface Ex10Detail extends Ex10Summary {
@@ -64,10 +64,13 @@ export interface BrowseFilters {
   form?: string;
   cik?: string;
   filer?: string;
-  sort?: 'newest' | 'oldest';
+  sort?: "newest" | "oldest";
 }
 
-export interface FormFacet { form_type: string; count: number; }
+export interface FormFacet {
+  form_type: string;
+  count: number;
+}
 
 export interface Stats {
   total: number;
@@ -80,108 +83,232 @@ export interface Stats {
 
 export interface SearchResult extends PageResult {
   query: string;
-  engine: 'fts' | 'like';
+  engine: "fts" | "like";
 }
 
 // substr keeps list payloads light (markdown bodies avg ~67KB).
 const summaryCols = {
-  id: exhibits.id, accession: exhibits.accession, cik: exhibits.cik,
-  formType: exhibits.formType, docType: exhibits.docType, filename: exhibits.filename,
-  description: exhibits.description, sequence: exhibits.sequence, filingUrl: exhibits.filingUrl,
-  foundAt: exhibits.foundAt, filedAt: exhibits.filedAt, markdownStatus: exhibits.markdownStatus,
-  filingMetadata: exhibits.filingMetadata, imageUrls: exhibits.imageUrls,
+  id: exhibits.id,
+  accession: exhibits.accession,
+  cik: exhibits.cik,
+  formType: exhibits.formType,
+  docType: exhibits.docType,
+  filename: exhibits.filename,
+  description: exhibits.description,
+  sequence: exhibits.sequence,
+  filingUrl: exhibits.filingUrl,
+  foundAt: exhibits.foundAt,
+  filedAt: exhibits.filedAt,
+  markdownStatus: exhibits.markdownStatus,
+  filingMetadata: exhibits.filingMetadata,
+  imageUrls: exhibits.imageUrls,
   markdown: sql<string>`substr(${exhibits.markdown}, 1, 2000)`,
 };
-// NULLS LAST emulation (D1's default null ordering is not guaranteed).
-const nullsLast = sql`(${exhibits.filedAt} IS NULL OR ${exhibits.filedAt} = '') ASC`;
-const orderNewest = [nullsLast, desc(exhibits.filedAt), desc(exhibits.foundAt), desc(exhibits.id)];
-const orderOldest = [nullsLast, asc(exhibits.filedAt), asc(exhibits.foundAt), asc(exhibits.id)];
+// Bare filed_at only. SQLite treats NULL and '' as smaller than any stamp, so
+// DESC already places undated rows last and ASC places them first. Wrapping
+// filed_at in `IS NULL OR = ''` (or adding found_at/id) makes D1 ignore
+// idx_ex_filed_at, scan every markdown blob, and then fail the rest of the
+// request with "Too many resources consumed within a 10 second window".
+const orderNewest = [desc(exhibits.filedAt)];
+const orderOldest = [asc(exhibits.filedAt)];
 
-function pages(total: number, size: number) { return total ? Math.max(1, Math.ceil(total / size)) : 0; }
+function pages(total: number, size: number) {
+  return total ? Math.max(1, Math.ceil(total / size)) : 0;
+}
 
-export async function listEx10(page = 1, pageSize = 20, filters: BrowseFilters = {}, db: DB = getDb()): Promise<PageResult> {
+// The SQL the list uses to order rows. Tests pin this so a "nulls last"
+// expression cannot sneak back in and force a full scan of the markdown column.
+export function listEx10OrderSql(db: DB, sort: "newest" | "oldest" = "newest"): string {
+  return db
+    .select({ id: exhibits.id })
+    .from(exhibits)
+    .orderBy(...(sort === "oldest" ? orderOldest : orderNewest))
+    .limit(1)
+    .toSQL().sql;
+}
+
+export async function listEx10(
+  page = 1,
+  pageSize = 20,
+  filters: BrowseFilters = {},
+  db: DB = getDb(),
+): Promise<PageResult> {
   const conds = [];
   if (filters.form) conds.push(eq(exhibits.formType, filters.form));
   if (filters.cik) conds.push(eq(exhibits.cik, filters.cik));
-  if (filters.filer) conds.push(sql`json_extract(${exhibits.filingMetadata}, '$.company_name') LIKE ${'%' + filters.filer + '%'} COLLATE NOCASE`);
+  if (filters.filer)
+    conds.push(
+      sql`json_extract(${exhibits.filingMetadata}, '$.company_name') LIKE ${"%" + filters.filer + "%"} COLLATE NOCASE`,
+    );
+  // Oldest is "earliest dated filing". `filed_at > ''` drops NULL and '' so
+  // those 740 undated rows do not lead the index, and the range still uses
+  // idx_ex_filed_at. Newest leaves them in: DESC already parks them last.
+  if (filters.sort === "oldest") conds.push(sql`${exhibits.filedAt} > ''`);
   const where = conds.length ? and(...conds) : undefined;
   const total = (await db.select({ n: count() }).from(exhibits).where(where))[0]?.n ?? 0;
-  const rows = await db.select(summaryCols).from(exhibits).where(where)
-    .orderBy(...(filters.sort === 'oldest' ? orderOldest : orderNewest))
-    .limit(pageSize).offset((page - 1) * pageSize);
-  return { items: rows.map(rowToSummary), total, page, page_size: pageSize, total_pages: pages(total, pageSize) };
+  const rows = await db
+    .select(summaryCols)
+    .from(exhibits)
+    .where(where)
+    .orderBy(...(filters.sort === "oldest" ? orderOldest : orderNewest))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+  return {
+    items: rows.map(rowToSummary),
+    total,
+    page,
+    page_size: pageSize,
+    total_pages: pages(total, pageSize),
+  };
 }
 
 export async function ex10Facets(db: DB = getDb()): Promise<{ forms: FormFacet[] }> {
-  const rows = await db.select({ form_type: exhibits.formType, count: count() }).from(exhibits)
+  const rows = await db
+    .select({ form_type: exhibits.formType, count: count() })
+    .from(exhibits)
     .where(sql`${exhibits.formType} IS NOT NULL AND ${exhibits.formType} <> ''`)
-    .groupBy(exhibits.formType).orderBy(desc(count()), asc(exhibits.formType));
+    .groupBy(exhibits.formType)
+    .orderBy(desc(count()), asc(exhibits.formType));
   return { forms: rows as FormFacet[] };
 }
 
-export async function ex10Since(seconds = 60, db: DB = getDb()): Promise<{ window_seconds: number; count: number; items: Ex10Summary[] }> {
-  const rows = await db.select(summaryCols).from(exhibits)
-    .where(sql`${exhibits.foundAt} >= datetime('now', ${'-' + Math.trunc(seconds) + ' seconds'})`)
+export async function ex10Since(
+  seconds = 60,
+  db: DB = getDb(),
+): Promise<{ window_seconds: number; count: number; items: Ex10Summary[] }> {
+  const rows = await db
+    .select(summaryCols)
+    .from(exhibits)
+    .where(sql`${exhibits.foundAt} >= datetime('now', ${"-" + Math.trunc(seconds) + " seconds"})`)
     .orderBy(...orderNewest);
   const items = rows.map(rowToSummary);
   return { window_seconds: seconds, count: items.length, items };
 }
 
 export async function ex10Detail(id: string, db: DB = getDb()): Promise<Ex10Detail | null> {
-  const row = (await db.select().from(exhibits).where(eq(exhibits.id, String(id))).limit(1))[0];
+  const row = (
+    await db
+      .select()
+      .from(exhibits)
+      .where(eq(exhibits.id, String(id)))
+      .limit(1)
+  )[0];
   if (!row) return null;
-  return { ...rowToSummary(row), sequence: row.sequence ?? '', markdown: row.markdown ?? '',
-           filing: parseFiling(row.filingMetadata) as FilingHeader, image_urls: parseImageUrls(row.imageUrls) };
+  return {
+    ...rowToSummary(row),
+    sequence: row.sequence ?? "",
+    markdown: row.markdown ?? "",
+    filing: parseFiling(row.filingMetadata) as FilingHeader,
+    image_urls: parseImageUrls(row.imageUrls),
+  };
 }
 
 // Search runs on the FTS5 index (migration 0003) so no query ever scans 19k
 // markdown bodies; `snippet()` gives the card its hit context with the matched
 // terms wrapped in <mark>. The LIKE path survives only as a fallback for a
 // database that predates the index (a local dev DB before `db:fts-backfill`).
-export async function ex10Search(query: string, page = 1, pageSize = 20, db: DB = getDb()): Promise<SearchResult> {
-  const q = (query ?? '').trim();
-  if (!q) return { query: '', engine: 'fts', items: [], total: 0, page, page_size: pageSize, total_pages: 0 };
+export async function ex10Search(
+  query: string,
+  page = 1,
+  pageSize = 20,
+  db: DB = getDb(),
+): Promise<SearchResult> {
+  const q = (query ?? "").trim();
+  if (!q)
+    return {
+      query: "",
+      engine: "fts",
+      items: [],
+      total: 0,
+      page,
+      page_size: pageSize,
+      total_pages: 0,
+    };
   const match = ftsQuery(q);
   try {
     const fts = sql`exhibits_fts`;
-    const total = (await db.select({ n: count() }).from(fts).where(sql`${fts} MATCH ${match}`))[0]?.n ?? 0;
-    const rows = await db.select({
-      ...summaryCols,
-      snippet: sql<string>`snippet(exhibits_fts, 2, '<mark>', '</mark>', '…', 28)`,
-    }).from(fts)
+    const total =
+      (
+        await db
+          .select({ n: count() })
+          .from(fts)
+          .where(sql`${fts} MATCH ${match}`)
+      )[0]?.n ?? 0;
+    const rows = await db
+      .select({
+        ...summaryCols,
+        snippet: sql<string>`snippet(exhibits_fts, 2, '<mark>', '</mark>', '…', 28)`,
+      })
+      .from(fts)
       .innerJoin(exhibits, sql`${exhibits.id} = exhibits_fts.id`)
       .where(sql`${fts} MATCH ${match}`)
       .orderBy(...orderNewest)
-      .limit(pageSize).offset((page - 1) * pageSize);
-    const items = rows.map((r) => ({ ...rowToSummary(r), snippet: r.snippet ?? '' }));
-    return { query: q, engine: 'fts', items, total, page, page_size: pageSize, total_pages: pages(total, pageSize) };
+      .limit(pageSize)
+      .offset((page - 1) * pageSize);
+    const items = rows.map((r) => ({ ...rowToSummary(r), snippet: r.snippet ?? "" }));
+    return {
+      query: q,
+      engine: "fts",
+      items,
+      total,
+      page,
+      page_size: pageSize,
+      total_pages: pages(total, pageSize),
+    };
   } catch (e) {
     if (!/no such table: exhibits_fts/i.test(String(e))) throw e;
   }
-  const like = `%${q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
+  const like = `%${q.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
   const cond = sql`(${exhibits.description} LIKE ${like} ESCAPE '\\' COLLATE NOCASE OR ${exhibits.markdown} LIKE ${like} ESCAPE '\\' COLLATE NOCASE)`;
   const total = (await db.select({ n: count() }).from(exhibits).where(cond))[0]?.n ?? 0;
-  const rows = await db.select(summaryCols).from(exhibits).where(cond).orderBy(...orderNewest)
-    .limit(pageSize).offset((page - 1) * pageSize);
-  return { query: q, engine: 'like', items: rows.map(rowToSummary), total, page, page_size: pageSize, total_pages: pages(total, pageSize) };
+  const rows = await db
+    .select(summaryCols)
+    .from(exhibits)
+    .where(cond)
+    .orderBy(...orderNewest)
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+  return {
+    query: q,
+    engine: "like",
+    items: rows.map(rowToSummary),
+    total,
+    page,
+    page_size: pageSize,
+    total_pages: pages(total, pageSize),
+  };
 }
 
 export async function ex10Stats(db: DB = getDb()): Promise<Stats> {
-  const c = async (w?: ReturnType<typeof sql>) => (await db.select({ n: count() }).from(exhibits).where(w))[0]?.n ?? 0;
+  const c = async (w?: ReturnType<typeof sql>) =>
+    (await db.select({ n: count() }).from(exhibits).where(w))[0]?.n ?? 0;
   const total = await c();
-  const with_markdown = await c(eq(exhibits.markdownStatus, 'done'));
-  const pending_markdown = await c(sql`${exhibits.markdownStatus} IS NULL OR ${exhibits.markdownStatus} = 'pending'`);
+  const with_markdown = await c(eq(exhibits.markdownStatus, "done"));
+  const pending_markdown = await c(
+    sql`${exhibits.markdownStatus} IS NULL OR ${exhibits.markdownStatus} = 'pending'`,
+  );
   const last_24h = await c(sql`${exhibits.foundAt} >= datetime('now','-1 day')`);
-  const byForm = await db.select({ k: exhibits.formType, c: count() }).from(exhibits).groupBy(exhibits.formType);
-  const byDoc = await db.select({ k: exhibits.docType, c: count() }).from(exhibits).groupBy(exhibits.docType);
-  return { total, with_markdown, pending_markdown, last_24h,
-           by_form_type: Object.fromEntries(byForm.map((r) => [r.k ?? '', r.c])),
-           by_doc_type: Object.fromEntries(byDoc.map((r) => [r.k ?? '', r.c])) };
+  const byForm = await db
+    .select({ k: exhibits.formType, c: count() })
+    .from(exhibits)
+    .groupBy(exhibits.formType);
+  const byDoc = await db
+    .select({ k: exhibits.docType, c: count() })
+    .from(exhibits)
+    .groupBy(exhibits.docType);
+  return {
+    total,
+    with_markdown,
+    pending_markdown,
+    last_24h,
+    by_form_type: Object.fromEntries(byForm.map((r) => [r.k ?? "", r.c])),
+    by_doc_type: Object.fromEntries(byDoc.map((r) => [r.k ?? "", r.c])),
+  };
 }
 
 export interface Freshness {
   exhibits: number;
-  latest_filed_at: string | null;    // SEC acceptance datetime "YYYYMMDDHHMMSS" (ET)
+  latest_filed_at: string | null; // SEC acceptance datetime "YYYYMMDDHHMMSS" (ET)
   latest_detected_at: string | null; // RFC3339 UTC: when the producer last captured a row
 }
 
@@ -189,11 +316,15 @@ export interface Freshness {
 // "live" from "stale". Both maxima ride an index (idx_ex_filed_at, idx_ex_detected_at).
 // Blank strings are excluded so they can never be reported as a date.
 export async function ex10Freshness(db: DB = getDb()): Promise<Freshness> {
-  const row = (await db.select({
-    n: count(),
-    filed: sql<string | null>`max(nullif(${exhibits.filedAt}, ''))`,
-    detected: sql<string | null>`max(nullif(${exhibits.detectedAt}, ''))`,
-  }).from(exhibits))[0];
+  const row = (
+    await db
+      .select({
+        n: count(),
+        filed: sql<string | null>`max(nullif(${exhibits.filedAt}, ''))`,
+        detected: sql<string | null>`max(nullif(${exhibits.detectedAt}, ''))`,
+      })
+      .from(exhibits)
+  )[0];
   return {
     exhibits: row?.n ?? 0,
     latest_filed_at: row?.filed ?? null,
