@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "vitest", "promise"],
+  "categories": {
+    "correctness": "error"
+  },
+  "ignorePatterns": ["dist", "node_modules", ".astro", ".wrangler", "dogfood-output"],
+  "overrides": [
+    {
+      "files": ["**/*.astro"],
+      "env": {
+        "builtin": true,
+        "astro": true,
+        "browser": true
+      },
+      "rules": {
+        "eslint/no-undef": "error"
+      }
+    },
+    {
+      "files": ["src/pages/index.astro"],
+      "globals": {
+        "REFRESH": "readonly"
+      }
+    },
+    {
+      "files": ["src/pages/agreements/*.astro"],
+      "globals": {
+        "filtered": "readonly"
+      }
+    },
+    {
+      "files": ["src/env.d.ts"],
+      "rules": {
+        "typescript/triple-slash-reference": "off"
+      }
+    }
+  ],
+  "options": {
+    "typeAware": true,
+    "typeCheck": true
+  }
+}

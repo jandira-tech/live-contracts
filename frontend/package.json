@@ -13,6 +13,9 @@
     "test:design": "node test/design-system.mjs",
     "test:smoke": "node test/smoke.mjs",
     "test:unit": "vitest run",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "lint": "oxlint",
     "db:generate": "drizzle-kit generate",
     "db:setup": "bun run scripts/seed-local-d1.ts",
     "db:fts-backfill": "bun run scripts/fts-backfill.ts",
@@ -32,9 +35,13 @@
   ],
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
+    "@astrojs/compiler-rs": "^0.5.2",
     "@cloudflare/vitest-pool-workers": "^0.17.0",
     "@cloudflare/workers-types": "^4.20241127.0",
     "drizzle-kit": "^0.31.10",
+    "oxfmt": "^0.76.0",
+    "oxlint": "^1.91.0",
+    "oxlint-tsgolint": "^7.0.2006",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
   }

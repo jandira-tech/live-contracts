@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { it, expect, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { seed, testDb } from './seed';   // seed() also applies migrations
 import { POST } from '../src/pages/api/ingest';

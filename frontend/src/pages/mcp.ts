@@ -79,7 +79,8 @@ function clampInt(v: unknown, min: number, max: number, def: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.trunc(n))) : def;
 }
-const str = (v: unknown): string => (v == null ? '' : String(v));
+const str = (v: unknown): string =>
+  typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? String(v) : '';
 
 function trim(it: Ex10Summary): Json {
   return {

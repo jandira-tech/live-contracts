@@ -5,10 +5,10 @@
  * `getDb()` — so the live loaders/pages call them unchanged, while tests
  * inject a seeded test database.
  */
-import { and, asc, count, desc, eq, sql } from "drizzle-orm";
-import { exhibits } from "../db/schema";
-import { getDb, type DB } from "../db/client";
-import { rowToSummary, parseFiling, parseImageUrls, ftsQuery } from "./summary";
+import { and, asc, count, desc, eq, sql } from 'drizzle-orm';
+import { exhibits } from '../db/schema';
+import { getDb, type DB } from '../db/client';
+import { rowToSummary, parseFiling, parseImageUrls, ftsQuery } from './summary';
 
 export interface FilingHeader {
   company_name?: string;
@@ -64,7 +64,7 @@ export interface BrowseFilters {
   form?: string;
   cik?: string;
   filer?: string;
-  sort?: "newest" | "oldest";
+  sort?: 'newest' | 'oldest';
 }
 
 export interface FormFacet {
@@ -83,7 +83,7 @@ export interface Stats {
 
 export interface SearchResult extends PageResult {
   query: string;
-  engine: "fts" | "like";
+  engine: 'fts' | 'like';
 }
 
 // substr keeps list payloads light (markdown bodies avg ~67KB).
@@ -118,11 +118,11 @@ function pages(total: number, size: number) {
 
 // The SQL the list uses to order rows. Tests pin this so a "nulls last"
 // expression cannot sneak back in and force a full scan of the markdown column.
-export function listEx10OrderSql(db: DB, sort: "newest" | "oldest" = "newest"): string {
+export function listEx10OrderSql(db: DB, sort: 'newest' | 'oldest' = 'newest'): string {
   return db
     .select({ id: exhibits.id })
     .from(exhibits)
-    .orderBy(...(sort === "oldest" ? orderOldest : orderNewest))
+    .orderBy(...(sort === 'oldest' ? orderOldest : orderNewest))
     .limit(1)
     .toSQL().sql;
 }
@@ -138,19 +138,19 @@ export async function listEx10(
   if (filters.cik) conds.push(eq(exhibits.cik, filters.cik));
   if (filters.filer)
     conds.push(
-      sql`json_extract(${exhibits.filingMetadata}, '$.company_name') LIKE ${"%" + filters.filer + "%"} COLLATE NOCASE`,
+      sql`json_extract(${exhibits.filingMetadata}, '$.company_name') LIKE ${'%' + filters.filer + '%'} COLLATE NOCASE`,
     );
   // Oldest is "earliest dated filing". `filed_at > ''` drops NULL and '' so
   // those 740 undated rows do not lead the index, and the range still uses
   // idx_ex_filed_at. Newest leaves them in: DESC already parks them last.
-  if (filters.sort === "oldest") conds.push(sql`${exhibits.filedAt} > ''`);
+  if (filters.sort === 'oldest') conds.push(sql`${exhibits.filedAt} > ''`);
   const where = conds.length ? and(...conds) : undefined;
   const total = (await db.select({ n: count() }).from(exhibits).where(where))[0]?.n ?? 0;
   const rows = await db
     .select(summaryCols)
     .from(exhibits)
     .where(where)
-    .orderBy(...(filters.sort === "oldest" ? orderOldest : orderNewest))
+    .orderBy(...(filters.sort === 'oldest' ? orderOldest : orderNewest))
     .limit(pageSize)
     .offset((page - 1) * pageSize);
   return {
@@ -179,7 +179,7 @@ export async function ex10Since(
   const rows = await db
     .select(summaryCols)
     .from(exhibits)
-    .where(sql`${exhibits.foundAt} >= datetime('now', ${"-" + Math.trunc(seconds) + " seconds"})`)
+    .where(sql`${exhibits.foundAt} >= datetime('now', ${'-' + Math.trunc(seconds) + ' seconds'})`)
     .orderBy(...orderNewest);
   const items = rows.map(rowToSummary);
   return { window_seconds: seconds, count: items.length, items };
@@ -196,8 +196,8 @@ export async function ex10Detail(id: string, db: DB = getDb()): Promise<Ex10Deta
   if (!row) return null;
   return {
     ...rowToSummary(row),
-    sequence: row.sequence ?? "",
-    markdown: row.markdown ?? "",
+    sequence: row.sequence ?? '',
+    markdown: row.markdown ?? '',
     filing: parseFiling(row.filingMetadata) as FilingHeader,
     image_urls: parseImageUrls(row.imageUrls),
   };
@@ -207,17 +207,12 @@ export async function ex10Detail(id: string, db: DB = getDb()): Promise<Ex10Deta
 // markdown bodies; `snippet()` gives the card its hit context with the matched
 // terms wrapped in <mark>. The LIKE path survives only as a fallback for a
 // database that predates the index (a local dev DB before `db:fts-backfill`).
-export async function ex10Search(
-  query: string,
-  page = 1,
-  pageSize = 20,
-  db: DB = getDb(),
-): Promise<SearchResult> {
-  const q = (query ?? "").trim();
+export async function ex10Search(query: string, page = 1, pageSize = 20, db: DB = getDb()): Promise<SearchResult> {
+  const q = (query ?? '').trim();
   if (!q)
     return {
-      query: "",
-      engine: "fts",
+      query: '',
+      engine: 'fts',
       items: [],
       total: 0,
       page,
@@ -245,10 +240,10 @@ export async function ex10Search(
       .orderBy(...orderNewest)
       .limit(pageSize)
       .offset((page - 1) * pageSize);
-    const items = rows.map((r) => ({ ...rowToSummary(r), snippet: r.snippet ?? "" }));
+    const items = rows.map((r) => ({ ...rowToSummary(r), snippet: r.snippet ?? '' }));
     return {
       query: q,
-      engine: "fts",
+      engine: 'fts',
       items,
       total,
       page,
@@ -258,7 +253,7 @@ export async function ex10Search(
   } catch (e) {
     if (!/no such table: exhibits_fts/i.test(String(e))) throw e;
   }
-  const like = `%${q.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+  const like = `%${q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')}%`;
   const cond = sql`(${exhibits.description} LIKE ${like} ESCAPE '\\' COLLATE NOCASE OR ${exhibits.markdown} LIKE ${like} ESCAPE '\\' COLLATE NOCASE)`;
   const total = (await db.select({ n: count() }).from(exhibits).where(cond))[0]?.n ?? 0;
   const rows = await db
@@ -270,7 +265,7 @@ export async function ex10Search(
     .offset((page - 1) * pageSize);
   return {
     query: q,
-    engine: "like",
+    engine: 'like',
     items: rows.map(rowToSummary),
     total,
     page,
@@ -280,29 +275,20 @@ export async function ex10Search(
 }
 
 export async function ex10Stats(db: DB = getDb()): Promise<Stats> {
-  const c = async (w?: ReturnType<typeof sql>) =>
-    (await db.select({ n: count() }).from(exhibits).where(w))[0]?.n ?? 0;
+  const c = async (w?: ReturnType<typeof sql>) => (await db.select({ n: count() }).from(exhibits).where(w))[0]?.n ?? 0;
   const total = await c();
-  const with_markdown = await c(eq(exhibits.markdownStatus, "done"));
-  const pending_markdown = await c(
-    sql`${exhibits.markdownStatus} IS NULL OR ${exhibits.markdownStatus} = 'pending'`,
-  );
+  const with_markdown = await c(eq(exhibits.markdownStatus, 'done'));
+  const pending_markdown = await c(sql`${exhibits.markdownStatus} IS NULL OR ${exhibits.markdownStatus} = 'pending'`);
   const last_24h = await c(sql`${exhibits.foundAt} >= datetime('now','-1 day')`);
-  const byForm = await db
-    .select({ k: exhibits.formType, c: count() })
-    .from(exhibits)
-    .groupBy(exhibits.formType);
-  const byDoc = await db
-    .select({ k: exhibits.docType, c: count() })
-    .from(exhibits)
-    .groupBy(exhibits.docType);
+  const byForm = await db.select({ k: exhibits.formType, c: count() }).from(exhibits).groupBy(exhibits.formType);
+  const byDoc = await db.select({ k: exhibits.docType, c: count() }).from(exhibits).groupBy(exhibits.docType);
   return {
     total,
     with_markdown,
     pending_markdown,
     last_24h,
-    by_form_type: Object.fromEntries(byForm.map((r) => [r.k ?? "", r.c])),
-    by_doc_type: Object.fromEntries(byDoc.map((r) => [r.k ?? "", r.c])),
+    by_form_type: Object.fromEntries(byForm.map((r) => [r.k ?? '', r.c])),
+    by_doc_type: Object.fromEntries(byDoc.map((r) => [r.k ?? '', r.c])),
   };
 }
 

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { seed, testDb } from "./seed";
+import { describe, it, expect, beforeEach } from 'vitest';
+import { seed, testDb } from './seed';
 import {
   listEx10,
   listEx10OrderSql,
@@ -9,9 +9,9 @@ import {
   ex10Since,
   ex10Stats,
   ex10Freshness,
-} from "../src/lib/api";
-import { exhibits } from "../src/db/schema";
-import { eq } from "drizzle-orm";
+} from '../src/lib/api';
+import { exhibits } from '../src/db/schema';
+import { eq } from 'drizzle-orm';
 
 let db: ReturnType<typeof testDb>;
 beforeEach(async () => {
@@ -19,172 +19,170 @@ beforeEach(async () => {
   db = testDb();
 });
 
-it("list order stays a bare filed_at sort so D1 can walk idx_ex_filed_at", () => {
+it('list order stays a bare filed_at sort so D1 can walk idx_ex_filed_at', () => {
   // An `IS NULL` / empty-string expression in ORDER BY makes D1 scan every
   // markdown blob (the table is ~1.8GB) and then reject the next query with
   // "Too many resources consumed within a 10 second window".
-  const newest = listEx10OrderSql(db, "newest").toLowerCase();
-  const oldest = listEx10OrderSql(db, "oldest").toLowerCase();
-  expect(newest).not.toContain("is null");
-  expect(oldest).not.toContain("is null");
+  const newest = listEx10OrderSql(db, 'newest').toLowerCase();
+  const oldest = listEx10OrderSql(db, 'oldest').toLowerCase();
+  expect(newest).not.toContain('is null');
+  expect(oldest).not.toContain('is null');
   // Extra sort keys force a temp B-tree over the whole table. One filed_at key
   // walks idx_ex_filed_at and stops at LIMIT.
   expect(newest).toMatch(/order by "exhibits"\."filed_at" desc limit/);
   expect(oldest).toMatch(/order by "exhibits"\."filed_at" asc limit/);
 });
 
-it("undated filings sort after dated ones on the newest list", async () => {
+it('undated filings sort after dated ones on the newest list', async () => {
   await db.insert(exhibits).values({
-    id: "blank",
-    accession: "acc-b",
-    filename: "blank.htm",
-    filedAt: "",
-    markdown: "undated",
+    id: 'blank',
+    accession: 'acc-b',
+    filename: 'blank.htm',
+    filedAt: '',
+    markdown: 'undated',
   });
   const res = await listEx10(1, 20, {}, db);
-  expect(res.items.map((i) => i.id)).toEqual(["2", "1", "blank"]);
+  expect(res.items.map((i) => i.id)).toEqual(['2', '1', 'blank']);
 });
 
-it("oldest browse is the earliest dated filing, and skips undated rows", async () => {
+it('oldest browse is the earliest dated filing, and skips undated rows', async () => {
   await db.insert(exhibits).values({
-    id: "blank",
-    accession: "acc-b",
-    filename: "blank.htm",
-    filedAt: "",
-    markdown: "undated",
+    id: 'blank',
+    accession: 'acc-b',
+    filename: 'blank.htm',
+    filedAt: '',
+    markdown: 'undated',
   });
-  const res = await listEx10(1, 20, { sort: "oldest" }, db);
-  expect(res.items.map((i) => i.id)).toEqual(["1", "2"]);
+  const res = await listEx10(1, 20, { sort: 'oldest' }, db);
+  expect(res.items.map((i) => i.id)).toEqual(['1', '2']);
   expect(res.total).toBe(2);
 });
 
-it("listEx10: newest-by-filed_at first, with paging + filing fields", async () => {
+it('listEx10: newest-by-filed_at first, with paging + filing fields', async () => {
   const res = await listEx10(1, 20, {}, db);
   expect(res.total).toBe(2);
-  expect(res.items.map((i) => i.id)).toEqual(["2", "1"]);
-  expect(res.items[0].excerpt).toContain("Beta");
-  expect(res.items[0].company_name).toBe("Beta LLC");
+  expect(res.items.map((i) => i.id)).toEqual(['2', '1']);
+  expect(res.items[0].excerpt).toContain('Beta');
+  expect(res.items[0].company_name).toBe('Beta LLC');
 });
-it("listEx10: filters by form_type", async () => {
-  const res = await listEx10(1, 20, { form: "8-K" }, db);
+it('listEx10: filters by form_type', async () => {
+  const res = await listEx10(1, 20, { form: '8-K' }, db);
   expect(res.total).toBe(1);
-  expect(res.items[0].id).toBe("1");
+  expect(res.items[0].id).toBe('1');
 });
-it("ex10Detail: full markdown + parsed filing + images", async () => {
-  const d = await ex10Detail("2", db);
-  expect(d?.markdown).toContain("Beta agreement");
-  expect(d?.filing?.company_name).toBe("Beta LLC");
-  expect(d?.image_urls).toEqual(["https://hf/x/p1.jpg"]);
+it('ex10Detail: full markdown + parsed filing + images', async () => {
+  const d = await ex10Detail('2', db);
+  expect(d?.markdown).toContain('Beta agreement');
+  expect(d?.filing?.company_name).toBe('Beta LLC');
+  expect(d?.image_urls).toEqual(['https://hf/x/p1.jpg']);
 });
-it("ex10Detail: null for missing id", async () => {
-  expect(await ex10Detail("999", db)).toBeNull();
+it('ex10Detail: null for missing id', async () => {
+  expect(await ex10Detail('999', db)).toBeNull();
 });
-it("ex10Search: matches body, newest first; empty query → none", async () => {
-  const r = await ex10Search("leasing", 1, 20, db);
-  expect(r.engine).toBe("fts");
+it('ex10Search: matches body, newest first; empty query → none', async () => {
+  const r = await ex10Search('leasing', 1, 20, db);
+  expect(r.engine).toBe('fts');
   expect(r.total).toBe(2);
-  expect(r.items[0].id).toBe("2");
-  expect(r.items[0].snippet).toContain("<mark>leasing</mark>");
-  expect((await ex10Search("   ", 1, 20, db)).total).toBe(0);
+  expect(r.items[0].id).toBe('2');
+  expect(r.items[0].snippet).toContain('<mark>leasing</mark>');
+  expect((await ex10Search('   ', 1, 20, db)).total).toBe(0);
 });
-it("ex10Search: FTS operators in user input are literal, phrases stay phrases", async () => {
-  expect((await ex10Search("leasing OR *", 1, 20, db)).total).toBe(0);
-  expect((await ex10Search('"contract body"', 1, 20, db)).items.map((i) => i.id)).toEqual(["1"]);
+it('ex10Search: FTS operators in user input are literal, phrases stay phrases', async () => {
+  expect((await ex10Search('leasing OR *', 1, 20, db)).total).toBe(0);
+  expect((await ex10Search('"contract body"', 1, 20, db)).items.map((i) => i.id)).toEqual(['1']);
   expect((await ex10Search('"body contract"', 1, 20, db)).total).toBe(0);
 });
-it("ex10Search: the index follows inserts and updates through the triggers", async () => {
-  await db
-    .insert(exhibits)
-    .values({
-      id: "9",
-      accession: "acc-9",
-      filename: "z.htm",
-      description: "Zeta",
-      markdown: "unique zebra clause",
-    });
-  expect((await ex10Search("zebra", 1, 20, db)).items.map((i) => i.id)).toEqual(["9"]);
-  await db.update(exhibits).set({ markdown: "now a giraffe clause" }).where(eq(exhibits.id, "9"));
-  expect((await ex10Search("zebra", 1, 20, db)).total).toBe(0);
-  expect((await ex10Search("giraffe", 1, 20, db)).total).toBe(1);
+it('ex10Search: the index follows inserts and updates through the triggers', async () => {
+  await db.insert(exhibits).values({
+    id: '9',
+    accession: 'acc-9',
+    filename: 'z.htm',
+    description: 'Zeta',
+    markdown: 'unique zebra clause',
+  });
+  expect((await ex10Search('zebra', 1, 20, db)).items.map((i) => i.id)).toEqual(['9']);
+  await db.update(exhibits).set({ markdown: 'now a giraffe clause' }).where(eq(exhibits.id, '9'));
+  expect((await ex10Search('zebra', 1, 20, db)).total).toBe(0);
+  expect((await ex10Search('giraffe', 1, 20, db)).total).toBe(1);
 });
-it("ex10Facets / ex10Stats", async () => {
+it('ex10Facets / ex10Stats', async () => {
   const f = await ex10Facets(db);
   expect(f.forms).toEqual(
     expect.arrayContaining([
-      { form_type: "8-K", count: 1 },
-      { form_type: "10-Q", count: 1 },
+      { form_type: '8-K', count: 1 },
+      { form_type: '10-Q', count: 1 },
     ]),
   );
   const s = await ex10Stats(db);
   expect(s.total).toBe(2);
   expect(s.with_markdown).toBe(2);
 });
-it("ex10Since includes a fresh row and excludes the old seed rows", async () => {
-  const nowSql = new Date().toISOString().replace("T", " ").slice(0, 19); // 'YYYY-MM-DD HH:MM:SS'
+it('ex10Since includes a fresh row and excludes the old seed rows', async () => {
+  const nowSql = new Date().toISOString().replace('T', ' ').slice(0, 19); // 'YYYY-MM-DD HH:MM:SS'
   await db.insert(exhibits).values({
-    id: "99",
-    accession: "fresh",
-    filename: "n.htm",
-    docType: "EX-10.9",
-    formType: "8-K",
+    id: '99',
+    accession: 'fresh',
+    filename: 'n.htm',
+    docType: 'EX-10.9',
+    formType: '8-K',
     foundAt: nowSql,
-    filedAt: "20260527120000",
-    markdownStatus: "done",
-    filingMetadata: "{}",
-    imageUrls: "[]",
-    markdown: "fresh body",
+    filedAt: '20260527120000',
+    markdownStatus: 'done',
+    filingMetadata: '{}',
+    imageUrls: '[]',
+    markdown: 'fresh body',
   });
   const res = await ex10Since(3600, db);
-  expect(res.items.map((i) => i.accession)).toEqual(["fresh"]); // seed rows are months old
+  expect(res.items.map((i) => i.accession)).toEqual(['fresh']); // seed rows are months old
 });
 
-describe("ex10Freshness (GET /stats.json)", () => {
-  it("reports the row count and the newest filed_at / detected_at", async () => {
+describe('ex10Freshness (GET /stats.json)', () => {
+  it('reports the row count and the newest filed_at / detected_at', async () => {
     // Seed rows carry no detected_at (pre-enrichment producer) — it must read as null,
     // never as an empty string that a staleness check would mistake for a date.
     expect(await ex10Freshness(db)).toEqual({
       exhibits: 2,
-      latest_filed_at: "20260502120000",
+      latest_filed_at: '20260502120000',
       latest_detected_at: null,
     });
     await db.insert(exhibits).values([
       {
-        id: "3",
-        accession: "acc-3",
-        filename: "c.htm",
-        docType: "EX-10.1",
-        filedAt: "20260930170000",
-        detectedAt: "2026-09-30T21:00:05+00:00",
-        markdown: "x",
+        id: '3',
+        accession: 'acc-3',
+        filename: 'c.htm',
+        docType: 'EX-10.1',
+        filedAt: '20260930170000',
+        detectedAt: '2026-09-30T21:00:05+00:00',
+        markdown: 'x',
       },
       // An older filing detected later (a backfill): the two maxima are independent.
       {
-        id: "4",
-        accession: "acc-4",
-        filename: "d.htm",
-        docType: "EX-10.1",
-        filedAt: "20260810090000",
-        detectedAt: "2026-10-02T09:00:00+00:00",
-        markdown: "y",
+        id: '4',
+        accession: 'acc-4',
+        filename: 'd.htm',
+        docType: 'EX-10.1',
+        filedAt: '20260810090000',
+        detectedAt: '2026-10-02T09:00:00+00:00',
+        markdown: 'y',
       },
       // A blank filed_at must not win MAX() or be reported.
       {
-        id: "5",
-        accession: "acc-5",
-        filename: "e.htm",
-        docType: "EX-10.1",
-        filedAt: "",
-        markdown: "z",
+        id: '5',
+        accession: 'acc-5',
+        filename: 'e.htm',
+        docType: 'EX-10.1',
+        filedAt: '',
+        markdown: 'z',
       },
     ]);
     expect(await ex10Freshness(db)).toEqual({
       exhibits: 5,
-      latest_filed_at: "20260930170000",
-      latest_detected_at: "2026-10-02T09:00:00+00:00",
+      latest_filed_at: '20260930170000',
+      latest_detected_at: '2026-10-02T09:00:00+00:00',
     });
   });
 
-  it("an empty table reports zero and nulls rather than throwing", async () => {
+  it('an empty table reports zero and nulls rather than throwing', async () => {
     await db.delete(exhibits);
     expect(await ex10Freshness(db)).toEqual({
       exhibits: 0,

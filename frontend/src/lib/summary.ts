@@ -3,7 +3,7 @@ import type { ExhibitRow } from '../db/schema';
 
 const IMG_REF = /\([^()]*\.(?:jpe?g|png|gif|tiff?|svg|webp)(?:\s+"[^"]*")?[^()]*\)/gi;
 const MD_MARKERS = /\*+|_{2,}|`+|#+|>+|\[|\]|!\[/g;
-const LEADING_LABEL = /^\s*(?:(?:exhibit|ex)[\s.\-]*\d+(?:\.\d+)?\b\s*)+/i;
+const LEADING_LABEL = /^\s*(?:(?:exhibit|ex)[\s.-]*\d+(?:\.\d+)?\b\s*)+/i;
 
 export function cleanExcerpt(text: string | null | undefined, limit = 1000): string {
   if (!text) return '';
@@ -28,7 +28,7 @@ const FILENAME_HEAD = /^\s*\S+\.(?:html?|txt)\b[\s\\]*/i;
 // EDGARMaster prepends a one-line SEC SGML header — "<TYPE> <SEQUENCE> <FILENAME>
 // <DESCRIPTION>" (e.g. "EX-10.1 3 aspi_ex101.htm SUBSCRIPTION AGREEMENT") — plus an
 // HTML comment, before the exhibit body. None of it is document content.
-const SEC_HEADER = /^﻿?[ \t]*(?:EX-[\w.\-]+[ \t]+\d+[ \t]+\S+\.(?:html?|txt)\b[^\n]*\n+)?(?:<!--[\s\S]*?-->\s*)*/i;
+const SEC_HEADER = /^﻿?[ \t]*(?:EX-[\w.-]+[ \t]+\d+[ \t]+\S+\.(?:html?|txt)\b[^\n]*\n+)?(?:<!--[\s\S]*?-->\s*)*/i;
 export function stripMdHead(md: string | null | undefined): string {
   if (!md) return '';
   return md.replace(SEC_HEADER, '').replace(FILENAME_HEAD, '').trimStart();
@@ -38,7 +38,7 @@ export function stripMdHead(md: string | null | undefined): string {
 // anyway) and the redundant leading "Exhibit 10.x" label (the whole site is
 // EX-10). Stripped from the *snippet* only; the detail page keeps the full doc.
 const MD_IMAGE = /!\[[^\]]*\]\([^)]*\)/g;
-const LEADING_EXHIBIT = /^[ \t]*(?:#{1,6}[ \t]*)?\**[ \t]*(?:exhibit|ex)\b[ \t.\-]*\d+(?:\.\d+)?[ \t]*\**[ \t]*(?:\r?\n+|$)/i;
+const LEADING_EXHIBIT = /^[ \t]*(?:#{1,6}[ \t]*)?\**[ \t]*(?:exhibit|ex)\b[ \t.-]*\d+(?:\.\d+)?[ \t]*\**[ \t]*(?:\r?\n+|$)/i;
 
 // A *markdown* excerpt for the visual cards: a leading slice of the real markdown
 // (markers intact), cleaned of the noise above and cut on a block boundary so
@@ -73,6 +73,12 @@ export function parseImageUrls(raw: string | null | undefined): string[] {
   catch { return []; }
 }
 
+// Filing JSON values are `unknown`. Only primitives have a defined string form;
+// an object must not become "[object Object]".
+function textOf(v: unknown): string {
+  return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? String(v) : '';
+}
+
 // Row may carry a truncated markdown (list views select substr(...) AS markdown).
 export function rowToSummary(r: Partial<ExhibitRow>): Ex10Summary {
   const filing = parseFiling(r.filingMetadata ?? null);
@@ -83,10 +89,10 @@ export function rowToSummary(r: Partial<ExhibitRow>): Ex10Summary {
     markdown_status: r.markdownStatus ?? '',
     excerpt: cleanExcerpt(r.markdown, 1000), excerpt_md: markdownExcerpt(r.markdown),
     has_markdown: Boolean(r.markdown),
-    company_name: String(filing.company_name ?? ''), period: String(filing.period ?? ''),
-    location: String(filing.location ?? ''),
+    company_name: textOf(filing.company_name), period: textOf(filing.period),
+    location: textOf(filing.location),
     items: Array.isArray(filing.items) ? (filing.items as string[]) : [],
-    filed_at: r.filedAt ?? String(filing.filed_at ?? ''),
+    filed_at: r.filedAt ?? textOf(filing.filed_at),
     image_urls: parseImageUrls(r.imageUrls ?? null),
   };
 }
@@ -97,7 +103,7 @@ export function rowToSummary(r: Partial<ExhibitRow>): Ex10Summary {
 // ("EX-10.1", "EXHIBIT 10.34"); the real title is the first heading-like line
 // of the markdown. Pure functions, unit-tested in test/summary.test.ts.
 // ---------------------------------------------------------------------------
-const LABEL_ONLY = /^\s*(?:(?:exhibit|ex)[\s.\-]*\d+(?:\.\d+)?[a-z]?)?\s*$/i;
+const LABEL_ONLY = /^\s*(?:(?:exhibit|ex)[\s.-]*\d+(?:\.\d+)?[a-z]?)?\s*$/i;
 export function isLabelOnly(description: string | null | undefined): boolean {
   return LABEL_ONLY.test(description ?? '');
 }
