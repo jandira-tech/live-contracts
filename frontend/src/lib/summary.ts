@@ -261,8 +261,9 @@ export function ftsQuery(input: string | null | undefined): string {
   const s = (input ?? '').trim();
   if (!s) return '';
   const parts: string[] = [];
-  // A balanced "…" is a phrase; any other quote is a token boundary (#86).
-  const re = /"([^"]+)"|([^\s"]+)/g;
+  // A quote opens a phrase only at the start or after whitespace, "(" or "[";
+  // any other quote is a token boundary (#86, #88: O"Neil must not open one).
+  const re = /(?:^|(?<=[\s([]))"([^"]+)"|([^\s"]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
     const raw = (m[1] ?? m[2]).replace(/[*^:()]/g, ' ').trim();
@@ -271,9 +272,13 @@ export function ftsQuery(input: string | null | undefined): string {
   return parts.join(' ');
 }
 
-/** FTS5 snippet() delimiters: private-use characters, so a literal "<mark>" in a filing stays text (#86). */
-export const SNIPPET_OPEN = '\uE000';
-export const SNIPPET_CLOSE = '\uE001';
+/**
+ * FTS5 snippet() delimiters. Unicode noncharacters, which are not for interchange:
+ * a literal "<mark>" (#86) or a private-use glyph from a Wingdings conversion (#88)
+ * in a filing stays text.
+ */
+export const SNIPPET_OPEN = '\uFDD0';
+export const SNIPPET_CLOSE = '\uFDD1';
 const OPEN = SNIPPET_OPEN;
 const CLOSE = SNIPPET_CLOSE;
 
@@ -307,24 +312,29 @@ export function snippetHtml(snippet: string | null | undefined): string {
       .replace(new RegExp(`${OPEN}\\s*${CLOSE}`, 'g'), ' ')
       .replace(/\s+/g, ' ')
       .trim();
-  const plain = tidy(
-    (snippet ?? '')
-      // Zero-width characters first: one inside `<!--` would hide the comment.
-      .replace(/[\u200B-\u200D\uFEFF]/g, '')
-      // HTML comments (Workiva/Wdesk banners) and Word downlevel fragments are
-      // not text. A snippet can end inside a comment; one that starts with "…"
-      // can start inside one, and then only its closing marker is dropped, so a
-      // stray "-->" in prose never costs the words before it.
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<!\[(?:if[^\]]*|endif)\](?:--)?>/gi, ' ')
-      .replace(/^(…(?:(?!<!--)[\s\S])*?)\s*-->/, '$1 ')
-      .replace(/\s*<!--[\s\S]*$/, '…')
-      .replace(/[#*_`|\\]+/g, '')
-      .replace(/(^|\s)>+/g, '$1')
-      .replace(/(^|\s)[-:\s]*-{3,}[-:\s]*(?=\s|$)/g, '$1')
-      .replace(/(^|\s)-(?=\s|$)/g, '$1'),
-  );
-  const html = tidy(balanceMarks(plain));
+  // Zero-width characters first: one inside `<!--` would hide the comment.
+  // HTML comments (Workiva/Wdesk banners) and Word downlevel fragments are not text.
+  let t = (snippet ?? '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<!\[(?:if[^\]]*|endif)\](?:--)?>/gi, ' ');
+  // A snippet starting with "…" can start inside a comment: drop only its closing
+  // marker, so a stray "-->" in prose never costs the words before it. Any snippet
+  // can end inside one. indexOf keeps both linear on long whitespace runs (#88).
+  const close = t.startsWith('…') ? t.indexOf('-->') : -1;
+  if (close >= 0) t = `${t.slice(0, close)} ${t.slice(close + 3)}`;
+  const open = t.indexOf('<!--');
+  if (open >= 0) t = `${t.slice(0, open).trimEnd()}…`;
+  t = t
+    .replace(/[#*_`|\\]+/g, '')
+    // Blockquote markers exist only at line starts; a mid-sentence ">" is text.
+    .replace(/(^|\n)[ \t]*>+/g, '$1');
+  // Table rules and lone dashes, token by token (a regex over runs is quadratic).
+  t = t
+    .split(/(\s+)/)
+    .filter((tok) => tok !== '-' && !/^[-:]*-{3,}[-:]*$/.test(tok))
+    .join('');
+  const html = tidy(balanceMarks(tidy(t)));
   if (!html.replace(new RegExp(`[…\\s${OPEN}${CLOSE}]`, 'g'), '')) return '';
   return html
     .replace(/&/g, '&amp;')

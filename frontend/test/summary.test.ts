@@ -302,9 +302,37 @@ describe('filing text cannot inject marks; stray quotes split tokens (#86)', () 
     );
   });
   it('treats a stray quote as a token boundary instead of fusing words', () => {
-    expect(ftsQuery('foo"bar baz"')).toBe('"foo" "bar baz"');
+    expect(ftsQuery('foo"bar baz"')).toBe('"foo" "bar" "baz"');
     expect(ftsQuery('O"Neil')).toBe('"O" "Neil"');
     expect(ftsQuery('"credit agreement" lender')).toBe('"credit agreement" "lender"');
+  });
+});
+
+describe('final review (#88)', () => {
+  it('delimits hits with noncharacters, so private-use glyphs from filings stay text', () => {
+    expect([SNIPPET_OPEN, SNIPPET_CLOSE]).toEqual(['\uFDD0', '\uFDD1']);
+    expect(snippetHtml(`filing \uE000logo\uE001 rest ${SNIPPET_OPEN}hit${SNIPPET_CLOSE}`)).toBe(
+      'filing \uE000logo\uE001 rest <mark class="sl-mark">hit</mark>',
+    );
+  });
+  it('stays linear on long whitespace and dash runs', () => {
+    const t0 = performance.now();
+    snippetHtml(`…${' '.repeat(200_000)}x`);
+    snippetHtml(`a ${'- '.repeat(50_000)}b`);
+    snippetHtml(`a ${'-'.repeat(100_000)}:${' '.repeat(100_000)}b`);
+    expect(performance.now() - t0).toBeLessThan(250);
+  });
+  it('keeps a mid-sentence ">" and strips blockquote markers at line starts', () => {
+    expect(snippetHtml(fts('revenues > $10M and <mark>hit</mark>'))).toBe(
+      'revenues &gt; $10M and <mark class="sl-mark">hit</mark>',
+    );
+    expect(snippetHtml(fts('line one\n> quoted <mark>x</mark>'))).toBe(
+      'line one quoted <mark class="sl-mark">x</mark>',
+    );
+  });
+  it('opens a phrase only at a word boundary', () => {
+    expect(ftsQuery('O"Neil said "credit agreement"')).toBe('"O" "Neil" "said" "credit agreement"');
+    expect(ftsQuery('("credit agreement")')).toBe('"credit agreement"');
   });
 });
 
