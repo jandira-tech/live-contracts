@@ -37,9 +37,11 @@ await check('search page form', '/search', 'class="sl-search-row', 'role="search
 await check('search results', '/search?q=agreement', 'results for', 'class="sl-doc"');
 {
   // A page past the end redirects to the last page instead of "N results" over "No matches" (#84).
+  const first = await (await fetch(`${BASE}/search?q=agreement`)).text();
+  const last = first.match(/class="current">1 \/ (\d+)</)?.[1];
   const res = await fetch(`${BASE}/search?q=agreement&page=99999`, { redirect: 'manual' });
   const loc = res.headers.get('location') ?? '';
-  if (res.status === 302 && /\/search\?q=agreement&page=\d+$/.test(loc) && !loc.endsWith('page=99999')) {
+  if (last && res.status === 302 && loc.endsWith(`/search?q=agreement&page=${last}`)) {
     console.log(`✓ search page past the end redirects (${loc})`);
   } else {
     failures += 1;

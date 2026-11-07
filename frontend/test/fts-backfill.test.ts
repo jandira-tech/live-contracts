@@ -59,6 +59,7 @@ describe('parseArgs (AC 2.2)', () => {
     [['--remote', '--to', '9', '--env', 'staging']],
     [['--local', '--origin', 'https://live-contracts.arthur.law']],
     [['--remote', '--to', '9', '--from', '1', '--from', '2']],
+    [['--remote', '--remote', '--to', '9']],
   ])('rejects %j', (argv) => {
     expect(() => parseArgs(argv)).toThrow(/usage/i);
   });
@@ -73,7 +74,7 @@ const ids = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
  * `size: null` models wrangler omitting `meta.size_after`.
  */
 function fakeD1(
-  state: { rows: number[]; index: number[]; size?: number | null; corrupt?: boolean },
+  state: { rows: number[]; index: number[]; size?: number | null; corrupt?: boolean; integrityError?: string },
   hooks: { onChunk?: (i: number) => void; failChunk?: number; onRead?: (sql: string) => void } = {},
 ) {
   const writes: string[] = [];
@@ -93,6 +94,7 @@ function fakeD1(
     if (below) return r([{ n: state.rows.filter((id) => id <= Number(below[1])).length }]);
     if (sql === "INSERT INTO exhibits_fts(exhibits_fts, rank) VALUES('integrity-check', 1)") {
       integrityChecks++;
+      if (state.integrityError) throw new Error(state.integrityError);
       if (state.corrupt) throw new Error('D1_ERROR: database disk image is malformed');
       return r([]);
     }
@@ -267,6 +269,15 @@ describe('runBackfill', () => {
     expect(lines.join('\n')).not.toMatch(/DONE/);
   });
 
+  it('does not call a timed-out integrity-check corruption or advise delete-all (#87)', async () => {
+    const f = fakeD1({ rows: ids(7), index: [], integrityError: 'D1 DB exceeded its CPU time limit [7429]' });
+    const { d, lines } = deps(f.exec);
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.EXEC_FAILED, lastHi: 7 });
+    const log = lines.join('\n');
+    expect(log).toMatch(/integrity-check did not finish/);
+    expect(log).not.toMatch(/delete-all/);
+  });
+
   it('maps a failed read before any chunk to EXEC_FAILED, not a crash (#83)', async () => {
     const f = fakeD1(
       { rows: ids(7), index: [] },
@@ -317,6 +328,11 @@ describe('parseWranglerJson (#83)', () => {
   it('leaves changes and size undefined when wrangler omits them (local --json)', () => {
     const stdout = '[{"results":[],"success":true,"meta":{"duration":0}}]';
     expect(parseWranglerJson(stdout)).toEqual({ rows: [], changes: undefined, sizeAfter: undefined, durationMs: 0 });
+  });
+
+  it('ignores trailing output and banner lines that start with [ (#87)', () => {
+    expect(parseWranglerJson(`${row}Done in 412ms\n`).rows).toEqual([{ n: 3 }]);
+    expect(parseWranglerJson(`[mf:inf] local db ready\n${row}`).rows).toEqual([{ n: 3 }]);
   });
 
   it('rejects an unsuccessful statement', () => {

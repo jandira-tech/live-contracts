@@ -308,6 +308,36 @@ describe('filing text cannot inject marks; stray quotes split tokens (#86)', () 
   });
 });
 
+describe('review of the #84/#85 fixes (#87)', () => {
+  it('never deletes prose before a stray --> at the start of a snippet', () => {
+    expect(snippetHtml(fts('…units priced at $10 --> per the <mark>agreement</mark>'))).toBe(
+      '…units priced at $10 per the <mark class="sl-mark">agreement</mark>',
+    );
+  });
+  it('sees a comment whose marker hides a zero-width character', () => {
+    expect(snippetHtml(fts('<!\uFEFF-- Document created using Wdesk --> Exhibit <mark>Agreement</mark>'))).toBe(
+      'Exhibit <mark class="sl-mark">Agreement</mark>',
+    );
+  });
+  it('drops Word downlevel conditional fragments', () => {
+    expect(
+      snippetHtml(
+        fts('IN WITNESS WHEREOF <![endif]--> the <mark>parties</mark> <![if !supportLists]>1.<![endif]> agreed'),
+      ),
+    ).toBe('IN WITNESS WHEREOF the <mark class="sl-mark">parties</mark> 1. agreed');
+  });
+  it('returns nothing for an all-comment snippet and drops emptied hits', () => {
+    expect(snippetHtml('<!-- Workiva page footer…')).toBe('');
+    expect(snippetHtml(fts('<mark>\u200B</mark> tail'))).toBe('tail');
+  });
+  it('keeps escaped marker characters and a literal trailing backslash', () => {
+    expect(textContent('aspi\\_ex101.htm SUBSCRIPTION')).toBe('aspi_ex101.htm SUBSCRIPTION');
+    expect(textContent('3\\* shares')).toBe('3* shares');
+    expect(textContent('path ends C:\\')).toBe('path ends C:\\');
+    expect(textContent('AMENDMENT TO\\\nSTOCK PURCHASE')).toBe('AMENDMENT TO STOCK PURCHASE');
+  });
+});
+
 describe('snippetHtml drops HTML comments and zero-width characters (#85)', () => {
   it('removes whole comments, including ones that contain a hit', () => {
     expect(
@@ -323,7 +353,7 @@ describe('snippetHtml drops HTML comments and zero-width characters (#85)', () =
   });
   it('removes a comment cut in half by the snippet window', () => {
     expect(snippetHtml(fts('…11/6/2026 09:56:08 PM (UTC)--> SECOND AMENDMENT to <mark>agreement</mark>'))).toBe(
-      '…SECOND AMENDMENT to <mark class="sl-mark">agreement</mark>',
+      '…11/6/2026 09:56:08 PM (UTC) SECOND AMENDMENT to <mark class="sl-mark">agreement</mark>',
     );
     expect(snippetHtml(fts('the <mark>agreement</mark> ends <!-- Workiva page footer…'))).toBe(
       'the <mark class="sl-mark">agreement</mark> ends…',
