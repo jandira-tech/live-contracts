@@ -1,7 +1,15 @@
 // Backfill core (AC 2.1–2.5 in contracts_fix.md §4). Pure functions with injected
 // deps: no child processes run inside the Workers pool.
 import { describe, it, expect } from 'vitest';
-import { EXIT, parseArgs, planRanges, runBackfill, type Deps, type ExecResult } from '../scripts/fts-backfill-core';
+import {
+  EXIT,
+  parseArgs,
+  parseWranglerJson,
+  planRanges,
+  runBackfill,
+  type Deps,
+  type ExecResult,
+} from '../scripts/fts-backfill-core';
 
 describe('planRanges (AC 2.1)', () => {
   it('covers (from, to] in ascending half-open chunks', () => {
@@ -49,42 +57,61 @@ describe('parseArgs (AC 2.2)', () => {
     [['--local', '--remote', '--to', '9']],
     [['--remote', '--to', '9', '--from', '10']],
     [['--remote', '--to', '9', '--env', 'staging']],
+    [['--local', '--origin', 'https://live-contracts.arthur.law']],
+    [['--remote', '--to', '9', '--from', '1', '--from', '2']],
   ])('rejects %j', (argv) => {
     expect(() => parseArgs(argv)).toThrow(/usage/i);
   });
 });
 
-/** A scripted D1: answers the backfill's read queries from `state`, records every write. */
+/** Rowids 1..n. */
+const ids = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+
+/**
+ * A scripted D1 over a row-set model: `rows` are the rowids in `exhibits`, `index`
+ * the rowids in the FTS index (duplicates allowed, as FTS5 allows them).
+ * `size: null` models wrangler omitting `meta.size_after`.
+ */
 function fakeD1(
-  state: { n: number; m: number; docs: number; below?: number; size?: number },
-  hooks: { onChunk?: (i: number) => void; failChunk?: number } = {},
+  state: { rows: number[]; index: number[]; size?: number | null; corrupt?: boolean },
+  hooks: { onChunk?: (i: number) => void; failChunk?: number; onRead?: (sql: string) => void } = {},
 ) {
   const writes: string[] = [];
+  let integrityChecks = 0;
   const exec = async (sql: string): Promise<ExecResult> => {
     const r = (rows: Record<string, unknown>[], changes = 0): ExecResult => ({
       rows,
       changes,
-      sizeAfter: state.size ?? 1000,
+      sizeAfter: state.size === null ? undefined : (state.size ?? 1000),
       durationMs: 5,
     });
-    if (/^SELECT count\(\*\) AS n, max\(rowid\) AS m FROM exhibits$/.test(sql)) return r([{ n: state.n, m: state.m }]);
-    if (/FROM exhibits_fts_docsize/.test(sql)) return r([{ n: state.docs }]);
-    if (/^SELECT count\(\*\) AS n FROM exhibits WHERE rowid <= \d+$/.test(sql)) return r([{ n: state.below ?? 0 }]);
-    if (sql.startsWith('INSERT INTO exhibits_fts(rowid, description, markdown)')) {
+    if (sql.startsWith('SELECT')) hooks.onRead?.(sql);
+    if (/^SELECT count\(\*\) AS n, max\(rowid\) AS m FROM exhibits$/.test(sql))
+      return r([{ n: state.rows.length, m: Math.max(0, ...state.rows) }]);
+    if (/^SELECT count\(\*\) AS n FROM exhibits_fts_docsize$/.test(sql)) return r([{ n: state.index.length }]);
+    const below = sql.match(/^SELECT count\(\*\) AS n FROM exhibits WHERE rowid <= (\d+)$/);
+    if (below) return r([{ n: state.rows.filter((id) => id <= Number(below[1])).length }]);
+    if (sql === "INSERT INTO exhibits_fts(exhibits_fts, rank) VALUES('integrity-check', 1)") {
+      integrityChecks++;
+      if (state.corrupt) throw new Error('D1_ERROR: database disk image is malformed');
+      return r([]);
+    }
+    const chunk = sql.match(
+      /^INSERT INTO exhibits_fts\(rowid, description, markdown\) SELECT rowid, coalesce\(description, ''\), coalesce\(markdown, ''\) FROM exhibits WHERE rowid > (\d+) AND rowid <= (\d+)$/,
+    );
+    if (chunk) {
       const i = writes.length;
       writes.push(sql);
       if (hooks.failChunk === i) throw new Error('D1_ERROR: boom');
-      const [lo, hi] = sql
-        .match(/rowid > (\d+) AND rowid <= (\d+)/)!
-        .slice(1)
-        .map(Number);
-      state.docs += hi - lo;
+      const [lo, hi] = [Number(chunk[1]), Number(chunk[2])];
+      const added = state.rows.filter((id) => id > lo && id <= hi);
+      state.index.push(...added);
       hooks.onChunk?.(i);
-      return r([], hi - lo);
+      return r([], added.length);
     }
     throw new Error(`unexpected SQL: ${sql}`);
   };
-  return { exec, writes };
+  return { exec, writes, integrityChecks: () => integrityChecks };
 }
 const deps = (exec: Deps['exec'], probe: Deps['probe'] = async () => 200) => {
   const lines: string[] = [];
@@ -100,19 +127,26 @@ const deps = (exec: Deps['exec'], probe: Deps['probe'] = async () => 200) => {
 const BASE = { mode: 'remote' as const, db: 'sec-ex10', from: 0, chunk: 3, origin: 'https://o' };
 
 describe('runBackfill', () => {
-  it('indexes every range and ends with DONE (AC 2.5 from 0)', async () => {
-    const f = fakeD1({ n: 7, m: 7, docs: 0 });
+  it('indexes every range, runs integrity-check, and ends with DONE (AC 2.5 from 0)', async () => {
+    const f = fakeD1({ rows: ids(7), index: [] });
     const { d, lines, probes } = deps(f.exec);
     expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.DONE, lastHi: 7 });
     expect(f.writes).toHaveLength(3);
     expect(f.writes[0]).toMatch(/WHERE rowid > 0 AND rowid <= 3$/);
     expect(f.writes[0]).not.toMatch(/NOT EXISTS/);
     expect(probes).toEqual(['https://o/stats.json', 'https://o/stats.json', 'https://o/stats.json']);
+    expect(f.integrityChecks()).toBe(1);
     expect(lines.at(-1)).toBe('DONE to=7');
   });
 
+  it('handles rowid gaps: 6 rows with max rowid 7 index to 6 documents', async () => {
+    const f = fakeD1({ rows: [1, 2, 3, 4, 5, 7], index: [] });
+    const { d } = deps(f.exec);
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.DONE, lastHi: 7 });
+  });
+
   it('resumes from --from when the index holds exactly the rows at or below it (AC 2.5)', async () => {
-    const f = fakeD1({ n: 7, m: 7, docs: 6, below: 6 });
+    const f = fakeD1({ rows: ids(7), index: ids(6) });
     const { d, lines } = deps(f.exec);
     expect(await runBackfill(d, { ...BASE, from: 6, to: 7 })).toEqual({ code: EXIT.DONE, lastHi: 7 });
     expect(f.writes).toHaveLength(1);
@@ -121,7 +155,7 @@ describe('runBackfill', () => {
   });
 
   it('refuses a fresh run over a non-empty index', async () => {
-    const f = fakeD1({ n: 7, m: 7, docs: 2 });
+    const f = fakeD1({ rows: ids(7), index: [1, 2] });
     const { d, lines } = deps(f.exec);
     expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.INDEX_STATE);
     expect(f.writes).toHaveLength(0);
@@ -129,37 +163,40 @@ describe('runBackfill', () => {
   });
 
   it('refuses to resume when an unlogged chunk already committed', async () => {
-    const f = fakeD1({ n: 7, m: 7, docs: 6, below: 3 });
+    const f = fakeD1({ rows: ids(7), index: ids(6) });
     const { d } = deps(f.exec);
     expect((await runBackfill(d, { ...BASE, from: 3, to: 7 })).code).toBe(EXIT.INDEX_STATE);
     expect(f.writes).toHaveLength(0);
   });
 
   it('refuses when --to differs from the frozen max(rowid): the producer is still writing', async () => {
-    const f = fakeD1({ n: 8, m: 8, docs: 0 });
+    const f = fakeD1({ rows: ids(8), index: [] });
     const { d } = deps(f.exec);
     expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.SIGNATURE_CHANGED);
     expect(f.writes).toHaveLength(0);
   });
 
   it('stops when the base signature changes mid-run (AC 2.3)', async () => {
-    const state = { n: 7, m: 7, docs: 0 };
-    const f = fakeD1(state, {
-      onChunk: (i) => {
-        if (i === 0) {
-          state.n = 8;
-          state.m = 8;
-        }
-      },
-    });
+    const state = { rows: ids(7), index: [] as number[] };
+    const f = fakeD1(state, { onChunk: (i) => i === 0 && state.rows.push(8) });
     const { d, lines } = deps(f.exec);
     expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.SIGNATURE_CHANGED, lastHi: 3 });
     expect(f.writes).toHaveLength(1);
     expect(lines.join('\n')).toMatch(/SIGNATURE_CHANGED/);
   });
 
+  it('stops at the next chunk boundary when a trigger indexed a row ahead of the backfill (#83)', async () => {
+    // An UPDATE leaves (count, max rowid) unchanged but fires exhibits_fts_au on rowid 5.
+    const state = { rows: ids(7), index: [] as number[] };
+    const f = fakeD1(state, { onChunk: (i) => i === 0 && state.index.push(5) });
+    const { d, lines } = deps(f.exec);
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.INDEX_STATE, lastHi: 3 });
+    expect(f.writes).toHaveLength(1);
+    expect(lines.join('\n')).toMatch(/after chunk \(0, 3\].*4.*expected 3/);
+  });
+
   it('stops after three retries of an unhealthy probe (AC 2.4)', async () => {
-    const f = fakeD1({ n: 7, m: 7, docs: 0 });
+    const f = fakeD1({ rows: ids(7), index: [] });
     const { d, probes } = deps(f.exec, async () => 500);
     const sleeps: number[] = [];
     d.sleep = async (ms) => {
@@ -172,35 +209,121 @@ describe('runBackfill', () => {
   });
 
   it('recovers from a transient probe failure', async () => {
-    const f = fakeD1({ n: 7, m: 7, docs: 0 });
+    const f = fakeD1({ rows: ids(7), index: [] });
     let calls = 0;
     const { d } = deps(f.exec, async () => (++calls === 1 ? 503 : 200));
     expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.DONE);
   });
 
-  it('reports a failed chunk with its range and the recovery path', async () => {
-    const f = fakeD1({ n: 7, m: 7, docs: 0 }, { failChunk: 1 });
+  it('reports a failed chunk with its range and both possible outcomes (#83)', async () => {
+    const f = fakeD1({ rows: ids(7), index: [] }, { failChunk: 1 });
     const { d, lines } = deps(f.exec);
     expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.CHUNK_FAILED, lastHi: 3 });
-    expect(lines.join('\n')).toMatch(/--from 3/);
+    const log = lines.join('\n');
+    expect(log).toMatch(/CHUNK_FAILED \(3, 6\]/);
+    expect(log).toMatch(/--from 3/);
+    expect(log).toMatch(/committed/);
+    expect(log).not.toMatch(/A failed D1 statement rolls back\./);
   });
 
   it('stops above the 8 GB storage cap', async () => {
-    const f = fakeD1({ n: 7, m: 7, docs: 0, size: 8_000_000_001 });
+    const f = fakeD1({ rows: ids(7), index: [], size: 8_000_000_001 });
     const { d } = deps(f.exec);
     expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.SIZE_CAP, lastHi: 3 });
   });
 
+  it('fails closed when a remote write does not report size_after (#83)', async () => {
+    const f = fakeD1({ rows: ids(7), index: [], size: null });
+    const { d, lines } = deps(f.exec);
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.SIZE_CAP, lastHi: 3 });
+    expect(lines.join('\n')).toMatch(/size_after/);
+  });
+
+  it('local runs log an unknown size instead of 0 (#83)', async () => {
+    const f = fakeD1({ rows: ids(7), index: [], size: null });
+    const { d, lines } = deps(f.exec);
+    expect((await runBackfill(d, { mode: 'local', db: 'sec-ex10', from: 0, chunk: 3 })).code).toBe(EXIT.DONE);
+    expect(lines.find((l) => l.startsWith('chunk (0, 3]'))).toMatch(/size=n\/a/);
+  });
+
   it('fails when the final document count differs from the row count', async () => {
-    const f = fakeD1({ n: 6, m: 7, docs: 0 }); // a rowid gap: 6 rows, max rowid 7; fake indexes 7
+    const state = { rows: ids(7), index: [] as number[] };
+    let docReads = 0;
+    // 1 resume read + 3 per-chunk reads; the 5th docsize read is the final one.
+    const f = fakeD1(state, {
+      onRead: (sql) => {
+        if (sql.includes('exhibits_fts_docsize') && ++docReads === 5) state.index.push(1);
+      },
+    });
     const { d } = deps(f.exec);
     expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.COUNT_MISMATCH);
   });
 
+  it('fails when integrity-check rejects an index whose counts look right (#83)', async () => {
+    const f = fakeD1({ rows: ids(7), index: [], corrupt: true });
+    const { d, lines } = deps(f.exec);
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.INTEGRITY, lastHi: 7 });
+    expect(lines.join('\n')).toMatch(/INTEGRITY.*malformed[\s\S]*delete-all/);
+    expect(lines.join('\n')).not.toMatch(/DONE/);
+  });
+
+  it('maps a failed read before any chunk to EXEC_FAILED, not a crash (#83)', async () => {
+    const f = fakeD1(
+      { rows: ids(7), index: [] },
+      {
+        onRead: (sql) => {
+          if (sql.includes('exhibits_fts_docsize')) throw new Error('SQLITE_BUSY');
+        },
+      },
+    );
+    const { d, lines } = deps(f.exec);
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.EXEC_FAILED, lastHi: 0 });
+    expect(lines.join('\n')).toMatch(/EXEC_FAILED.*SQLITE_BUSY/);
+  });
+
+  it('maps a failed read mid-run to EXEC_FAILED with the last indexed rowid (#83)', async () => {
+    let chunks = 0;
+    const f = fakeD1(
+      { rows: ids(7), index: [] },
+      {
+        onChunk: () => chunks++,
+        onRead: (sql) => {
+          if (chunks === 1 && sql.startsWith('SELECT count(*) AS n, max(rowid)')) throw new Error('fetch failed');
+        },
+      },
+    );
+    const { d, lines } = deps(f.exec);
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.EXEC_FAILED, lastHi: 3 });
+    expect(lines.join('\n')).toMatch(/--from 3/);
+  });
+
   it('local runs never probe and default --to to the current max(rowid)', async () => {
-    const f = fakeD1({ n: 7, m: 7, docs: 0 });
+    const f = fakeD1({ rows: ids(7), index: [] });
     const { d, probes } = deps(f.exec);
     expect((await runBackfill(d, { mode: 'local', db: 'sec-ex10', from: 0, chunk: 3 })).code).toBe(EXIT.DONE);
     expect(probes).toEqual([]);
+  });
+});
+
+describe('parseWranglerJson (#83)', () => {
+  const row =
+    '[\n  {\n    "results": [{ "n": 3 }],\n    "success": true,\n    "meta": { "changes": 2, "size_after": 123, "duration": 1.5 }\n  }\n]\n';
+
+  it('reads results and meta after the remote banner lines', () => {
+    const stdout = ` \n🌀 Executing on remote database sec-ex10 (abc):\n🌀 To execute on your local development database, remove the --remote flag [sic].\n${row}`;
+    expect(parseWranglerJson(stdout)).toEqual({ rows: [{ n: 3 }], changes: 2, sizeAfter: 123, durationMs: 1.5 });
+  });
+
+  it('leaves changes and size undefined when wrangler omits them (local --json)', () => {
+    const stdout = '[{"results":[],"success":true,"meta":{"duration":0}}]';
+    expect(parseWranglerJson(stdout)).toEqual({ rows: [], changes: undefined, sizeAfter: undefined, durationMs: 0 });
+  });
+
+  it('rejects an unsuccessful statement', () => {
+    expect(() => parseWranglerJson('[{"results":[],"success":false,"meta":{"duration":0}}]')).toThrow(/success/);
+  });
+
+  it('rejects output with no JSON array', () => {
+    expect(() => parseWranglerJson('✘ [ERROR] something broke')).toThrow(/no JSON/);
   });
 });
