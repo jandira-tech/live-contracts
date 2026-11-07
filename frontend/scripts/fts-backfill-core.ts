@@ -300,10 +300,13 @@ export function parseWranglerJson(stdout: string): ExecResult {
   };
 }
 
+/** Total scan allowed, in lengths of stdout: about four unclosed line-initial `[` lines. */
 const SCAN_BUDGET = 4;
 
-/** Index of the `]` closing the `[` at `start`, skipping JSON strings; -1 if none. */
+/** Index of the bracket closing the one at `start` (`[` or `{`), skipping JSON strings; -1 if none. */
 function matchingBracket(text: string, start: number): number {
+  const open = text[start];
+  const close = open === '{' ? '}' : ']';
   let depth = 0;
   let inString = false;
   for (let i = start; i < text.length; i++) {
@@ -312,8 +315,31 @@ function matchingBracket(text: string, start: number): number {
       if (c === '\\') i++;
       else if (c === '"') inString = false;
     } else if (c === '"') inString = true;
-    else if (c === '[') depth++;
-    else if (c === ']' && --depth === 0) return i;
+    else if (c === open) depth++;
+    else if (c === close && --depth === 0) return i;
   }
   return -1;
+}
+
+/**
+ * Map a failed `wrangler d1 execute` run to an Error. D1's structured error JSON
+ * (`{"error": {"text", "notes"}}`, anywhere in stdout, with any banner or trailing
+ * line) becomes a D1Error; anything else is a plain Error from stderr or the
+ * process message, which can never be classified INTEGRITY (#89).
+ */
+export function execFailure(stdout: string | undefined, stderr: string | undefined, message: string): Error {
+  for (const m of (stdout ?? '').matchAll(/^\{/gm)) {
+    const end = matchingBracket(stdout!, m.index);
+    if (end < 0) continue;
+    try {
+      const e = (
+        JSON.parse(stdout!.slice(m.index, end + 1)) as { error?: { text?: string; notes?: { text?: string }[] } }
+      ).error;
+      const text = [e?.text, ...(e?.notes ?? []).map((n) => n.text)].filter(Boolean).join(': ');
+      if (text) return new D1Error(text);
+    } catch {
+      // not the error object; keep looking
+    }
+  }
+  return new Error(stderr?.trim() || message);
 }

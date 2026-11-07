@@ -314,6 +314,9 @@ describe('confirmation review (#89)', () => {
     expect(snippetHtml(`x ${'<!-- '.repeat(40_000)}`)).toBe('x…');
     expect(performance.now() - t0).toBeLessThan(100);
   });
+  it('keeps a stray --> that follows a real comment at the start', () => {
+    expect(snippetHtml(fts('… <!-- c --> y --> <mark>z</mark>'))).toBe('… y --&gt; <mark class="sl-mark">z</mark>');
+  });
   it('drops square brackets inside tokens like parentheses', () => {
     expect(ftsQuery('[ credit agreement ]')).toBe('"credit" "agreement"');
     expect(ftsQuery('[credit]')).toBe('"credit"');
