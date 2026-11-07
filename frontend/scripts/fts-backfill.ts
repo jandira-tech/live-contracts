@@ -14,6 +14,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
+  D1Error,
   EXIT,
   parseArgs,
   parseWranglerJson,
@@ -35,7 +36,9 @@ function wranglerExec(opts: Opts) {
       ({ stdout } = await run('pnpm', args, { maxBuffer: 64 * 1024 * 1024 }));
     } catch (e) {
       const err = e as { stdout?: string; stderr?: string; message: string };
-      throw new Error(lastJsonError(err.stdout) ?? err.stderr?.trim() ?? err.message);
+      const d1 = lastJsonError(err.stdout);
+      if (d1) throw new D1Error(d1);
+      throw new Error(err.stderr?.trim() || err.message);
     }
     return parseWranglerJson(stdout);
   };
