@@ -105,6 +105,26 @@ it('ex10Search: the index follows inserts and updates through the triggers', asy
   expect((await ex10Search('zebra', 1, 20, db)).total).toBe(0);
   expect((await ex10Search('giraffe', 1, 20, db)).total).toBe(1);
 });
+it('ex10Search: pages split the hit list without overlap', async () => {
+  const p1 = await ex10Search('leasing', 1, 1, db);
+  const p2 = await ex10Search('leasing', 2, 1, db);
+  expect([p1.total, p1.total_pages]).toEqual([2, 2]);
+  expect([p1.items[0].id, p2.items[0].id]).toEqual(['2', '1']);
+  expect((await ex10Search('leasing', 3, 1, db)).items).toEqual([]);
+});
+it('ex10Search: a description-only match is found and keeps its title data', async () => {
+  await db.insert(exhibits).values({
+    id: '7',
+    accession: 'acc-7',
+    filename: 'o.htm',
+    filedAt: '20260101000000',
+    description: 'Omega indemnity',
+    markdown: 'nothing relevant here',
+  });
+  const r = await ex10Search('omega', 1, 20, db);
+  expect(r.items.map((i) => i.id)).toEqual(['7']);
+  expect(r.items[0].excerpt_md).toContain('nothing relevant');
+});
 it('ex10Facets / ex10Stats', async () => {
   const f = await ex10Facets(db);
   expect(f.forms).toEqual(
