@@ -266,7 +266,7 @@ export function ftsQuery(input: string | null | undefined): string {
   const re = /(?:^|(?<=[\s([]))"([^"]+)"|([^\s"]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
-    const raw = (m[1] ?? m[2]).replace(/[*^:()]/g, ' ').trim();
+    const raw = (m[1] ?? m[2]).replace(/[*^:()[\]]/g, ' ').trim();
     if (raw) parts.push(`"${raw}"`);
   }
   return parts.join(' ');
@@ -306,6 +306,20 @@ function balanceMarks(text: string): string {
  * cannot eat their angle brackets; everything else is escaped. `>` counts as a marker
  * only where it opens a token (blockquote), so a literal `a<b>` survives escaped.
  */
+/** Remove `<!-- … -->` in one pass; an unterminated one cuts the text with "…" (#88, #89). */
+function stripComments(t: string): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const open = t.indexOf('<!--', i);
+    if (open < 0) return out + t.slice(i);
+    const close = t.indexOf('-->', open + 4);
+    if (close < 0) return `${(out + t.slice(i, open)).trimEnd()}…`;
+    out += `${t.slice(i, open)} `;
+    i = close + 3;
+  }
+}
+
 export function snippetHtml(snippet: string | null | undefined): string {
   const tidy = (t: string) =>
     t
@@ -314,17 +328,12 @@ export function snippetHtml(snippet: string | null | undefined): string {
       .trim();
   // Zero-width characters first: one inside `<!--` would hide the comment.
   // HTML comments (Workiva/Wdesk banners) and Word downlevel fragments are not text.
-  let t = (snippet ?? '')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<!\[(?:if[^\]]*|endif)\](?:--)?>/gi, ' ');
+  let t = (snippet ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '');
   // A snippet starting with "…" can start inside a comment: drop only its closing
-  // marker, so a stray "-->" in prose never costs the words before it. Any snippet
-  // can end inside one. indexOf keeps both linear on long whitespace runs (#88).
-  const close = t.startsWith('…') ? t.indexOf('-->') : -1;
-  if (close >= 0) t = `${t.slice(0, close)} ${t.slice(close + 3)}`;
-  const open = t.indexOf('<!--');
-  if (open >= 0) t = `${t.slice(0, open).trimEnd()}…`;
+  // marker, so a stray "-->" in prose never costs the words before it (#87).
+  const lead = t.startsWith('…') ? t.indexOf('-->') : -1;
+  if (lead >= 0 && !t.slice(0, lead).includes('<!--')) t = `${t.slice(0, lead)} ${t.slice(lead + 3)}`;
+  t = stripComments(t).replace(/<!\[(?:if[^\]]*|endif)\](?:--)?>/gi, ' ');
   t = t
     .replace(/[#*_`|\\]+/g, '')
     // Blockquote markers exist only at line starts; a mid-sentence ">" is text.

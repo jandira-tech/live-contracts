@@ -2,6 +2,7 @@
 // deps: no child processes run inside the Workers pool.
 import { describe, it, expect } from 'vitest';
 import {
+  D1Error,
   EXIT,
   parseArgs,
   parseWranglerJson,
@@ -95,7 +96,7 @@ function fakeD1(
     if (sql === "INSERT INTO exhibits_fts(exhibits_fts, rank) VALUES('integrity-check', 1)") {
       integrityChecks++;
       if (state.integrityError) throw new Error(state.integrityError);
-      if (state.corrupt) throw new Error('D1_ERROR: database disk image is malformed');
+      if (state.corrupt) throw new D1Error('D1_ERROR: database disk image is malformed');
       return r([]);
     }
     const chunk = sql.match(
@@ -289,6 +290,17 @@ describe('runBackfill', () => {
     expect(lines.join('\n')).not.toMatch(/delete-all/);
   });
 
+  it('treats the corruption phrase in raw stderr as a failed check, not INTEGRITY (#89)', async () => {
+    const f = fakeD1({
+      rows: ids(7),
+      index: [],
+      integrityError: 'network timeout (stderr: last run exited after: database disk image is malformed)',
+    });
+    const { d, lines } = deps(f.exec);
+    expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.EXEC_FAILED);
+    expect(lines.join('\n')).not.toMatch(/delete-all/);
+  });
+
   it('maps a failed read before any chunk to EXEC_FAILED, not a crash (#83)', async () => {
     const f = fakeD1(
       { rows: ids(7), index: [] },
@@ -353,6 +365,13 @@ describe('parseWranglerJson (#83)', () => {
     expect(parseWranglerJson(`${banners}${row}`).rows).toEqual([{ n: 3 }]);
     expect(() => parseWranglerJson(banners)).toThrow(/no JSON/);
     expect(performance.now() - t0).toBeLessThan(500);
+  });
+
+  it('gives up quickly on many unclosed line-initial brackets (#89)', () => {
+    const t0 = performance.now();
+    expect(() => parseWranglerJson(`${'[#### progress\n'.repeat(5000)}${row}`)).toThrow(/no JSON/);
+    expect(performance.now() - t0).toBeLessThan(300);
+    expect(parseWranglerJson(`[#### progress\n[mf:inf] x\n${row}`).rows).toEqual([{ n: 3 }]);
   });
 
   it('reports an empty array as empty, not as success=undefined (#88)', () => {

@@ -45,6 +45,14 @@ export interface Deps {
   sleep(ms: number): Promise<void>;
 }
 
+/**
+ * An error D1 itself reported (wrangler's structured error JSON). Only these can
+ * prove the index corrupt; stderr or parser text never can (#89).
+ */
+export class D1Error extends Error {
+  override name = 'D1Error';
+}
+
 export const EXIT = {
   DONE: 0,
   SIGNATURE_CHANGED: 2,
@@ -221,8 +229,8 @@ async function backfill(
     const msg = (e as Error).message;
     // Only a rejection of the index is INTEGRITY. A CPU limit or a lost response
     // says nothing about the index, and delete-all would wipe a healthy one.
-    // SQLite's own SQLITE_CORRUPT text, never words found in wrangler's output (#88).
-    if (/database disk image is malformed/i.test(msg) && !/^wrangler (printed|reported)/.test(msg)) {
+    // SQLite's own SQLITE_CORRUPT text in D1's structured error (#88, #89).
+    if (e instanceof D1Error && /database disk image is malformed/i.test(msg)) {
       log(`INTEGRITY: integrity-check failed: ${msg}. Run ${RESET} and restart from 0.`);
       return { code: EXIT.INTEGRITY, lastHi };
     }
@@ -259,9 +267,14 @@ export function parseWranglerJson(stdout: string): ExecResult {
   // From each line-initial `[`, find its matching `]` with one string-aware scan and
   // parse that slice. Banners (even ones starting with `[`) and trailing lines are
   // skipped, and each candidate costs one pass (#87, #88).
+  // An unclosed candidate scans to the end of stdout, so the total scan is
+  // budgeted: past a few lengths of stdout the output is not wrangler's (#89).
   let parsed: unknown[] | undefined;
+  let budget = SCAN_BUDGET * (stdout.length + 1);
   for (const m of stdout.matchAll(/^\[/gm)) {
     const end = matchingBracket(stdout, m.index);
+    budget -= (end < 0 ? stdout.length : end) - m.index;
+    if (budget < 0) break;
     if (end < 0) continue;
     try {
       const v: unknown = JSON.parse(stdout.slice(m.index, end + 1));
@@ -286,6 +299,8 @@ export function parseWranglerJson(stdout: string): ExecResult {
     durationMs: Number(meta.duration ?? 0),
   };
 }
+
+const SCAN_BUDGET = 4;
 
 /** Index of the `]` closing the `[` at `start`, skipping JSON strings; -1 if none. */
 function matchingBracket(text: string, start: number): number {

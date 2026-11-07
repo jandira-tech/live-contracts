@@ -308,6 +308,18 @@ describe('filing text cannot inject marks; stray quotes split tokens (#86)', () 
   });
 });
 
+describe('confirmation review (#89)', () => {
+  it('stays linear on many unclosed comment openers', () => {
+    const t0 = performance.now();
+    expect(snippetHtml(`x ${'<!-- '.repeat(40_000)}`)).toBe('x…');
+    expect(performance.now() - t0).toBeLessThan(100);
+  });
+  it('drops square brackets inside tokens like parentheses', () => {
+    expect(ftsQuery('[ credit agreement ]')).toBe('"credit" "agreement"');
+    expect(ftsQuery('[credit]')).toBe('"credit"');
+  });
+});
+
 describe('final review (#88)', () => {
   it('delimits hits with noncharacters, so private-use glyphs from filings stay text', () => {
     expect([SNIPPET_OPEN, SNIPPET_CLOSE]).toEqual(['\uFDD0', '\uFDD1']);
