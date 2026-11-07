@@ -2,7 +2,9 @@
 // deps: no child processes run inside the Workers pool.
 import { describe, it, expect } from 'vitest';
 import {
+  D1Error,
   EXIT,
+  execFailure,
   parseArgs,
   parseWranglerJson,
   planRanges,
@@ -59,6 +61,7 @@ describe('parseArgs (AC 2.2)', () => {
     [['--remote', '--to', '9', '--env', 'staging']],
     [['--local', '--origin', 'https://live-contracts.arthur.law']],
     [['--remote', '--to', '9', '--from', '1', '--from', '2']],
+    [['--remote', '--remote', '--to', '9']],
   ])('rejects %j', (argv) => {
     expect(() => parseArgs(argv)).toThrow(/usage/i);
   });
@@ -73,7 +76,7 @@ const ids = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
  * `size: null` models wrangler omitting `meta.size_after`.
  */
 function fakeD1(
-  state: { rows: number[]; index: number[]; size?: number | null; corrupt?: boolean },
+  state: { rows: number[]; index: number[]; size?: number | null; corrupt?: boolean; integrityError?: string },
   hooks: { onChunk?: (i: number) => void; failChunk?: number; onRead?: (sql: string) => void } = {},
 ) {
   const writes: string[] = [];
@@ -93,7 +96,8 @@ function fakeD1(
     if (below) return r([{ n: state.rows.filter((id) => id <= Number(below[1])).length }]);
     if (sql === "INSERT INTO exhibits_fts(exhibits_fts, rank) VALUES('integrity-check', 1)") {
       integrityChecks++;
-      if (state.corrupt) throw new Error('D1_ERROR: database disk image is malformed');
+      if (state.integrityError) throw new Error(state.integrityError);
+      if (state.corrupt) throw new D1Error('D1_ERROR: database disk image is malformed');
       return r([]);
     }
     const chunk = sql.match(
@@ -267,6 +271,37 @@ describe('runBackfill', () => {
     expect(lines.join('\n')).not.toMatch(/DONE/);
   });
 
+  it('does not call a timed-out integrity-check corruption or advise delete-all (#87)', async () => {
+    const f = fakeD1({ rows: ids(7), index: [], integrityError: 'D1 DB exceeded its CPU time limit [7429]' });
+    const { d, lines } = deps(f.exec);
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.EXEC_FAILED, lastHi: 7 });
+    const log = lines.join('\n');
+    expect(log).toMatch(/integrity-check did not finish/);
+    expect(log).not.toMatch(/delete-all/);
+  });
+
+  it('never reads INTEGRITY out of wrangler output text (#88)', async () => {
+    const f = fakeD1({
+      rows: ids(7),
+      index: [],
+      integrityError: 'wrangler printed no JSON array: warning: cache looks corrupt, refreshing',
+    });
+    const { d, lines } = deps(f.exec);
+    expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.EXEC_FAILED);
+    expect(lines.join('\n')).not.toMatch(/delete-all/);
+  });
+
+  it('treats the corruption phrase in raw stderr as a failed check, not INTEGRITY (#89)', async () => {
+    const f = fakeD1({
+      rows: ids(7),
+      index: [],
+      integrityError: 'network timeout (stderr: last run exited after: database disk image is malformed)',
+    });
+    const { d, lines } = deps(f.exec);
+    expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.EXEC_FAILED);
+    expect(lines.join('\n')).not.toMatch(/delete-all/);
+  });
+
   it('maps a failed read before any chunk to EXEC_FAILED, not a crash (#83)', async () => {
     const f = fakeD1(
       { rows: ids(7), index: [] },
@@ -279,6 +314,7 @@ describe('runBackfill', () => {
     const { d, lines } = deps(f.exec);
     expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.EXEC_FAILED, lastHi: 0 });
     expect(lines.join('\n')).toMatch(/EXEC_FAILED.*SQLITE_BUSY/);
+    expect(lines.join('\n')).not.toMatch(/A read against D1 failed/);
   });
 
   it('maps a failed read mid-run to EXEC_FAILED with the last indexed rowid (#83)', async () => {
@@ -305,6 +341,71 @@ describe('runBackfill', () => {
   });
 });
 
+describe('execFailure: mapping a failed wrangler run (#89 follow-up)', () => {
+  const d1Json =
+    '{\n  "error": {\n    "text": "D1_ERROR: database disk image is malformed: SQLITE_CORRUPT",\n    "notes": [{ "text": "[code: 7500]" }]\n  }\n}';
+
+  it('raises D1Error for D1 structured error JSON, even with banners and trailing lines', () => {
+    const e = execFailure(
+      `🌀 Executing on remote database\n${d1Json}\n✘ [ERROR] done\n`,
+      'stderr noise',
+      'Command failed',
+    );
+    expect(e).toBeInstanceOf(D1Error);
+    expect(e.message).toBe('D1_ERROR: database disk image is malformed: SQLITE_CORRUPT: [code: 7500]');
+  });
+
+  it('falls back to a plain Error from stderr, then the process message', () => {
+    const a = execFailure('no json here', 'database disk image is malformed (from a proxy)', 'Command failed');
+    expect(a).not.toBeInstanceOf(D1Error);
+    expect(a.message).toMatch(/proxy/);
+    expect(execFailure(undefined, '  ', 'Command failed').message).toBe('Command failed');
+  });
+
+  it('keeps looking past junk objects and unclosed braces (#89 review)', () => {
+    expect(execFailure(`{"not":"error"}\n${d1Json}`, '', 'x')).toBeInstanceOf(D1Error);
+    expect(execFailure(`{\n${d1Json}`, '', 'x')).toBeInstanceOf(D1Error);
+  });
+
+  it('tolerates a non-array notes field', () => {
+    const e = execFailure('{"error":{"text":"database disk image is malformed","notes":"oops"}}', '', 'x');
+    expect(e).toBeInstanceOf(D1Error);
+    expect(e.message).toBe('database disk image is malformed');
+  });
+
+  it('stays linear on many unclosed braces', () => {
+    const t0 = performance.now();
+    expect(execFailure('{\n'.repeat(100_000), 'stderr', 'x')).not.toBeInstanceOf(D1Error);
+    expect(performance.now() - t0).toBeLessThan(300);
+  });
+
+  it('pins the scan budget: a few unclosed braces pass, many give up', () => {
+    // Each unclosed brace scans from its line to the end of the text.
+    const pad = (n: number) => `{${' '.repeat(20_000)}\n`.repeat(n);
+    expect(execFailure(`${pad(2)}${d1Json}`, '', 'x')).toBeInstanceOf(D1Error);
+    expect(execFailure(`${pad(20)}${d1Json}`, '', 'x')).not.toBeInstanceOf(D1Error);
+  });
+
+  it('ignores a non-string text and falls back to stderr', () => {
+    const e = execFailure('{"error":{"text":5}}', 'from stderr', 'x');
+    expect(e).not.toBeInstanceOf(D1Error);
+    expect(e.message).toBe('from stderr');
+  });
+
+  it('feeds INTEGRITY end to end only for the D1 path', async () => {
+    const run = async (err: Error) => {
+      const f = fakeD1({ rows: ids(7), index: [], integrityError: 'unused' });
+      const exec: Deps['exec'] = async (sql) => {
+        if (sql.includes("'integrity-check'")) throw err;
+        return f.exec(sql);
+      };
+      return (await runBackfill(deps(exec).d, { ...BASE, to: 7 })).code;
+    };
+    expect(await run(execFailure(d1Json, '', 'x'))).toBe(EXIT.INTEGRITY);
+    expect(await run(execFailure('', 'database disk image is malformed', 'x'))).toBe(EXIT.EXEC_FAILED);
+  });
+});
+
 describe('parseWranglerJson (#83)', () => {
   const row =
     '[\n  {\n    "results": [{ "n": 3 }],\n    "success": true,\n    "meta": { "changes": 2, "size_after": 123, "duration": 1.5 }\n  }\n]\n';
@@ -317,6 +418,30 @@ describe('parseWranglerJson (#83)', () => {
   it('leaves changes and size undefined when wrangler omits them (local --json)', () => {
     const stdout = '[{"results":[],"success":true,"meta":{"duration":0}}]';
     expect(parseWranglerJson(stdout)).toEqual({ rows: [], changes: undefined, sizeAfter: undefined, durationMs: 0 });
+  });
+
+  it('ignores trailing output and banner lines that start with [ (#87)', () => {
+    expect(parseWranglerJson(`${row}Done in 412ms\n`).rows).toEqual([{ n: 3 }]);
+    expect(parseWranglerJson(`[mf:inf] local db ready\n${row}`).rows).toEqual([{ n: 3 }]);
+  });
+
+  it('scans each candidate once, so many bracketed banner lines stay cheap (#88)', () => {
+    const banners = '[warn] something odd ]\n'.repeat(2000);
+    const t0 = performance.now();
+    expect(parseWranglerJson(`${banners}${row}`).rows).toEqual([{ n: 3 }]);
+    expect(() => parseWranglerJson(banners)).toThrow(/no JSON/);
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
+
+  it('gives up quickly on many unclosed line-initial brackets (#89)', () => {
+    const t0 = performance.now();
+    expect(() => parseWranglerJson(`${'[#### progress\n'.repeat(5000)}${row}`)).toThrow(/no JSON/);
+    expect(performance.now() - t0).toBeLessThan(300);
+    expect(parseWranglerJson(`[#### progress\n[mf:inf] x\n${row}`).rows).toEqual([{ n: 3 }]);
+  });
+
+  it('reports an empty array as empty, not as success=undefined (#88)', () => {
+    expect(() => parseWranglerJson('[]')).toThrow(/empty/);
   });
 
   it('rejects an unsuccessful statement', () => {

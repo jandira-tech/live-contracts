@@ -15,6 +15,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   EXIT,
+  execFailure,
   parseArgs,
   parseWranglerJson,
   runBackfill,
@@ -35,21 +36,10 @@ function wranglerExec(opts: Opts) {
       ({ stdout } = await run('pnpm', args, { maxBuffer: 64 * 1024 * 1024 }));
     } catch (e) {
       const err = e as { stdout?: string; stderr?: string; message: string };
-      throw new Error(lastJsonError(err.stdout) ?? err.stderr?.trim() ?? err.message);
+      throw execFailure(err.stdout, err.stderr, err.message);
     }
     return parseWranglerJson(stdout);
   };
-}
-
-function lastJsonError(stdout?: string): string | undefined {
-  const i = stdout?.search(/^\{/m) ?? -1;
-  if (!stdout || i < 0) return undefined;
-  try {
-    const e = JSON.parse(stdout.slice(i)).error;
-    return [e?.text, ...(e?.notes ?? []).map((n: { text: string }) => n.text)].filter(Boolean).join(': ');
-  } catch {
-    return undefined;
-  }
 }
 
 async function main(): Promise<number> {

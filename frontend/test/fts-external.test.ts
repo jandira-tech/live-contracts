@@ -30,7 +30,7 @@ describe('rows that predate the index (AC 1.1)', () => {
     const r = await ex10Search('leasing', 1, 20, testDb());
     expect(r.total).toBe(2);
     expect(r.items.map((i) => i.id)).toEqual(['2', '1']);
-    expect(r.items[0].snippet).toContain('<mark>leasing</mark>');
+    expect(r.items[0].snippet).toContain('\uFDD0leasing\uFDD1');
     await integrity(1);
   });
 });
@@ -140,7 +140,7 @@ describe('broad terms (AC 1.5)', () => {
     expect(p2.page_size).toBe(12);
     expect(p2.total_pages).toBe(26);
     expect(p2.items).toHaveLength(12);
-    expect(p2.items.every((i) => (i.snippet ?? '').includes('<mark>agreement</mark>'))).toBe(true);
+    expect(p2.items.every((i) => (i.snippet ?? '').includes('\uFDD0agreement\uFDD1'))).toBe(true);
     const dates = [...p1.items, ...p2.items].map((i) => i.filed_at);
     expect(dates).toEqual([...dates].sort((a = '', b = '') => b.localeCompare(a)));
     expect(new Set([...p1.items, ...p2.items].map((i) => i.id)).size).toBe(24);
@@ -150,7 +150,10 @@ describe('broad terms (AC 1.5)', () => {
 
   it('compute snippet() only for the page, via a rowid subquery with the LIMIT inside', () => {
     const q = searchPageSql(testDb(), '"agreement"', 12, 12).toLowerCase().replace(/\s+/g, ' ');
-    expect(q).toMatch(/snippet\(exhibits_fts, 1,/);
+    // -1: FTS5 takes the snippet from whichever column matched (#86).
+    expect(q).toMatch(/snippet\(exhibits_fts, -1,/);
+    expect(q.split('snippet(')).toHaveLength(2);
+    expect(q.indexOf('snippet(')).toBeLessThan(q.indexOf(' from exhibits_fts'));
     expect(q).toMatch(/\.rowid in \(select .* limit \? offset \?\)/);
     expect(q).not.toContain('exhibits"."id" = exhibits_fts.id');
   });

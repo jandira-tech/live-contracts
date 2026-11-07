@@ -257,3 +257,46 @@ The old Worker's search already fails against the new schema (`no such column: e
 - `server:defer` island for the result list if perceived latency on broad terms still matters after 3.1.
 - Move CI (`.github/workflows/frontend.yml`) and `db:setup` from bun to pnpm.
 - Index filer names from `filing_metadata` as a third FTS column.
+
+---
+
+## 8. Rollout record (2026-11-07, measured)
+
+| Step | Result |
+|---|---|
+| 0 Rollback target | Worker version `1b3c46b6-43cf-47f2-a33c-27a2d8f09e21` |
+| 2 Producer | Not paused. No writes since 2026-11-06T23:20Z (Saturday, EDGAR closed); signature `19554/19554` stable from 08:51Z through the end of the run. The rebuild path does not need a pause; the chunked path relied on the signature check plus the final integrity check |
+| 3 Time Travel bookmark | `0000647c-00000000-0000511c-7ed467cef241c6ccb9099dec2a47d317` |
+| 4 Ledger | `0002_boring_union_jack.sql` inserted; only `0003` pending |
+| 5 Migration | `0003_exhibits_fts.sql` applied; external content, three triggers, guarded `exhibits_fts_au`, 0 documents |
+| 6 One-shot `rebuild` | Failed after 38 s: `D1 DB exceeded its CPU time limit and was reset [7429]`. Rolled back cleanly (0 documents, site healthy) |
+| 7 Chunked backfill | `--chunk 200`, 98 chunks, 265–462 ms D1 time each, every `/stats.json` probe 200, `DONE to=19554`, exit 0. Size 1.836 GB → 2.294 GB |
+| 8 `integrity-check` rank 1 | Passed in 18.6 s |
+| 9 Direct probes | 19,554 documents for 19,554 rows; `engagement` 2,811, `agreement` 18,210 |
+| 10 Deploy | Worker version `a383dd51-47a1-44cf-b80b-89ee8dc1e59c` from `feat/fts-3-rollout` (`aebf627`) |
+| AC 3.1 | 30 uncached requests (5 × 6 terms) all 200; slowest 0.60 s (`a`); every page 12 cards with `<mark>` highlights |
+| AC 3.2 | `test/smoke-prod.sh` 14/14 ok; MCP `search_agreements` total 2,811 |
+| AC 3.3 | `agreement` page 1 and page 2 start with different exhibits |
+| AC 3.4 | Index = base after backfill. Rechecked 2026-11-07 10:58Z: 19,554 rows, 19,554 indexed, `integrity-check` rank 1 passed in 33.5 s. **Open:** recheck after the first weekday ingest batches |
+| AC 3.5 | Every chunk's health probe returned 200 (the script checks status, not latency) |
+| AC 3.6 | 2.294 GB, far under the 8 GB abort line |
+| 12 Post-resume ingest | **Open:** no rows since the backfill (max rowid still 19,554 at 10:58Z). Watch Monday's batches for overload errors, confirm `count(exhibits) = count(exhibits_fts_docsize)`, and rerun `integrity-check` rank 1. Its time grew from 18.6 s to 33.5 s on the same rows; if it nears D1's limit, run it off-peak |
+
+### 8.1 Post-rollout assessment and review rounds (2026-11-07)
+
+- Dogfood (`dogfood-output/fts-2026-11-07/report.md`) and an impeccable critique (dual-agent, 20/40; snapshot in `.impeccable/critique/`) ran after the rollout.
+- Other-corpus reviews: crush zai/glm-5.3 on c711eda, f02db3d and each fix round. Grok (grok-4.7) runs stalled past the cap and were stopped. pi died silently twice.
+- Fix rounds, each test-first and deployed after a `--dry-run`:
+
+| Issue | What | Worker version |
+|-------|------|----------------|
+| #83 | backfill exit codes, per-chunk index check, integrity-check, size_after fail-closed | (script only) |
+| #84 | past-the-end page redirect, markdown escapes in titles | `ef340c32` |
+| #85 | HTML comments and zero-width characters in snippets | `0b64a77a` |
+| #86 | snippet column -1, non-`<mark>` hit delimiters, quote-safe ftsQuery | `4066039c` |
+| #87 | review of #83–#85 | `b9f50bb5` |
+| #88 | final review: noncharacter delimiters, blank cards, linear regexes | `a6ab002e` |
+| #89 | confirmation review: residual quadratic paths, D1Error-only INTEGRITY | `f799d37f` |
+
+- Declined with reasons (in #86 and #87): guarding the triggers against un-indexed rows, counting through the join, and rowid-changing updates.
+- Cloudflare Workers Builds fails in 0 s on every stack branch. It passed on PRs #69–#74. The build never starts, so the cause is on the Cloudflare side and its logs need a dashboard login.

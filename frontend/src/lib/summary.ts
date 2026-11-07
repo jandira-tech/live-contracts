@@ -153,15 +153,21 @@ function titleCase(s: string): string {
 /** Visible text of a markdown slice: no markers, rules, comments or images. */
 export function textContent(md: string | null | undefined): string {
   if (!md) return '';
-  return md
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(MD_IMAGE, ' ')
-    .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`#>|]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    md
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(MD_IMAGE, ' ')
+      .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      // CommonMark: a backslash before a newline is a hard break; one before ASCII
+      // punctuation is an escape, so the character is kept even when it is a
+      // marker (`aspi\_ex101.htm`). Unescaped markers are dropped in the same pass.
+      .replace(/\\(?=\r?\n)/g, ' ')
+      .replace(/\\([!-/:-@[-`{-~])|[*_`#>|]+/g, (_m, esc: string | undefined) => esc ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 const DANGLING = /\b(?:to|of|and|the|for|dated|between|among|&|a|an|by)$/i;
@@ -179,7 +185,11 @@ export function displayTitle(
   const desc = (description ?? '').trim();
   if (!isLabelOnly(desc)) return desc === desc.toUpperCase() && desc.split(/\s+/).length > 2 ? titleCase(desc) : desc;
   const fallback = desc || 'EX-10';
-  let body = stripMdHead(markdown).replace(MD_IMAGE, '');
+  // A hard break (`\` before a newline) splits one heading over two lines; drop the
+  // backslash here so the per-line pass below can re-join them.
+  let body = stripMdHead(markdown)
+    .replace(MD_IMAGE, '')
+    .replace(/\\(?=\r?\n)/g, '');
   for (let i = 0; i < 3 && LEADING_EXHIBIT.test(body); i++) body = body.replace(LEADING_EXHIBIT, '');
   const raw = body
     .split('\n')
@@ -251,38 +261,92 @@ export function ftsQuery(input: string | null | undefined): string {
   const s = (input ?? '').trim();
   if (!s) return '';
   const parts: string[] = [];
-  const re = /"([^"]+)"|(\S+)/g;
+  // A quote opens a phrase only at the start or after whitespace, "(" or "[";
+  // any other quote is a token boundary (#86, #88: O"Neil must not open one).
+  const re = /(?:^|(?<=[\s([]))"([^"]+)"|([^\s"]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
-    const raw = (m[1] ?? m[2])
-      .replace(/"/g, '')
-      .replace(/[*^:()]/g, ' ')
-      .trim();
+    const raw = (m[1] ?? m[2]).replace(/[*^:()[\]]/g, ' ').trim();
     if (raw) parts.push(`"${raw}"`);
   }
   return parts.join(' ');
 }
 
-const OPEN = '\uE000';
-const CLOSE = '\uE001';
+/**
+ * FTS5 snippet() delimiters. Unicode noncharacters, which are not for interchange:
+ * a literal "<mark>" (#86) or a private-use glyph from a Wingdings conversion (#88)
+ * in a filing stays text.
+ */
+export const SNIPPET_OPEN = '\uFDD0';
+export const SNIPPET_CLOSE = '\uFDD1';
+const OPEN = SNIPPET_OPEN;
+const CLOSE = SNIPPET_CLOSE;
+
+/** Drop a close sentinel with no open one and close one left open, before the end ellipsis. */
+function balanceMarks(text: string): string {
+  let open = false;
+  let out = '';
+  for (const ch of text) {
+    if (ch === OPEN) {
+      if (open) continue;
+      open = true;
+    } else if (ch === CLOSE) {
+      if (!open) continue;
+      open = false;
+    }
+    out += ch;
+  }
+  if (!open) return out;
+  return out.endsWith('…') ? `${out.slice(0, -1).trimEnd()}${CLOSE}…` : `${out.trimEnd()}${CLOSE}`;
+}
+
+/** Remove `<!-- … -->` in one pass; an unterminated one cuts the text with "…" (#88, #89). */
+function stripComments(t: string): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const open = t.indexOf('<!--', i);
+    if (open < 0) return out + t.slice(i);
+    const close = t.indexOf('-->', open + 4);
+    if (close < 0) return `${(out + t.slice(i, open)).trimEnd()}…`;
+    out += `${t.slice(i, open)} `;
+    i = close + 3;
+  }
+}
 
 /**
- * Render an FTS5 snippet (plain markdown text plus `<mark>` tags) as safe HTML for a card.
+ * Render an FTS5 snippet (plain markdown text with SNIPPET_OPEN/CLOSE around hits) as safe HTML for a card.
  * The tags are swapped for private-use sentinels first, so stripping markdown markers
  * cannot eat their angle brackets; everything else is escaped. `>` counts as a marker
  * only where it opens a token (blockquote), so a literal `a<b>` survives escaped.
  */
+
 export function snippetHtml(snippet: string | null | undefined): string {
-  const plain = (snippet ?? '')
-    .replace(/<mark>/g, OPEN)
-    .replace(/<\/mark>/g, CLOSE)
+  const tidy = (t: string) =>
+    t
+      .replace(new RegExp(`${OPEN}\\s*${CLOSE}`, 'g'), ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  // Zero-width characters first: one inside `<!--` would hide the comment.
+  // HTML comments (Workiva/Wdesk banners) and Word downlevel fragments are not text.
+  let t = (snippet ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '');
+  // A snippet starting with "…" can start inside a comment: drop only its closing
+  // marker, so a stray "-->" in prose never costs the words before it (#87).
+  const lead = t.startsWith('…') ? t.indexOf('-->') : -1;
+  if (lead >= 0 && !t.slice(0, lead).includes('<!--')) t = `${t.slice(0, lead)} ${t.slice(lead + 3)}`;
+  t = stripComments(t).replace(/<!\[(?:if[^\]]*|endif)\](?:--)?>/gi, ' ');
+  t = t
     .replace(/[#*_`|\\]+/g, '')
-    .replace(/(^|\s)>+/g, '$1')
-    .replace(/(^|\s)[-:\s]*-{3,}[-:\s]*(?=\s|$)/g, '$1')
-    .replace(/(^|\s)-(?=\s|$)/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return plain
+    // Blockquote markers exist only at line starts; a mid-sentence ">" is text.
+    .replace(/(^|\n)[ \t]*>+/g, '$1');
+  // Table rules and lone dashes, token by token (a regex over runs is quadratic).
+  t = t
+    .split(/(\s+)/)
+    .filter((tok) => tok !== '-' && !/^[-:]*-{3,}[-:]*$/.test(tok))
+    .join('');
+  const html = tidy(balanceMarks(tidy(t)));
+  if (!html.replace(new RegExp(`[…\\s${OPEN}${CLOSE}]`, 'g'), '')) return '';
+  return html
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
