@@ -340,7 +340,8 @@ function matchingBracket(text: string, start: number): number {
  * INTEGRITY needs a D1Error *and* SQLite's SQLITE_CORRUPT phrase (see runBackfill),
  * so the tag alone never triggers delete-all advice. Only non-empty string
  * `text`/`notes` values count; a candidate without any is skipped, and if none
- * qualifies the mapping falls back to stderr.
+ * qualifies the mapping falls back to trimmed stderr, or to the caller's `message`
+ * when that is blank.
  */
 export function execFailure(stdout: string | undefined, stderr: string | undefined, message: string): Error {
   for (const v of jsonCandidates(stdout ?? '', '{')) {

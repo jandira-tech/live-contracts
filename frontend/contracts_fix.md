@@ -277,10 +277,10 @@ The old Worker's search already fails against the new schema (`no such column: e
 | AC 3.1 | 30 uncached requests (5 × 6 terms) all 200; slowest 0.60 s (`a`); every page 12 cards with `<mark>` highlights |
 | AC 3.2 | `test/smoke-prod.sh` 14/14 ok; MCP `search_agreements` total 2,811 |
 | AC 3.3 | `agreement` page 1 and page 2 start with different exhibits |
-| AC 3.4 | Index = base after backfill. **Open:** recheck after the first weekday ingest batches |
+| AC 3.4 | Index = base after backfill. Rechecked 2026-11-07 10:58Z: 19,554 rows, 19,554 indexed, `integrity-check` rank 1 passed in 33.5 s. **Open:** recheck after the first weekday ingest batches |
 | AC 3.5 | Every chunk's health probe returned 200 (the script checks status, not latency) |
 | AC 3.6 | 2.294 GB, far under the 8 GB abort line |
-| 12 Post-resume ingest | **Open:** no filings on the weekend; watch Monday's batches for overload errors and rerun `integrity-check` rank 1 |
+| 12 Post-resume ingest | **Open:** no rows since the backfill (max rowid still 19,554 at 10:58Z). Watch Monday's batches for overload errors, confirm `count(exhibits) = count(exhibits_fts_docsize)`, and rerun `integrity-check` rank 1. Its time grew from 18.6 s to 33.5 s on the same rows; if it nears D1's limit, run it off-peak |
 
 ### 8.1 Post-rollout assessment and review rounds (2026-11-07)
 
