@@ -174,7 +174,7 @@ The old Worker's search already fails against the new schema (`no such column: e
 - After every chunk: log `hi`, `changes`, `durationMs`, `sizeAfter`; probe `/stats.json`, retry 3× with 1/2/4 s backoff; non-200 → exit 3. `sizeAfter > 8 GB` → exit 5. Chunk error → exit 4 and print the recovery commands. The last log line of a successful run is `DONE to=<hi>`.
 - No parallel chunks. No checkpoint file. Resume is `--from <last logged hi>`. Before any write the script checks that `count(*) FROM exhibits_fts_docsize` equals `count(*) FROM exhibits WHERE rowid <= from` (0 for a fresh run). A chunk that committed but was never logged fails this check (exit 7), so recovery is always `INSERT INTO exhibits_fts(exhibits_fts) VALUES('delete-all')` then a run from 0. At the end the document count must equal the row count (exit 6 otherwise).
 - `--to` must equal the snapshot's `max(rowid)`; a mismatch means the producer is still writing (exit 2).
-- Exit codes: 0 done, 2 signature changed, 3 unhealthy probe, 4 chunk failed, 5 size cap, 6 count mismatch, 7 index state, 64 usage.
+- Exit codes: 0 done, 2 signature changed, 3 unhealthy probe, 4 chunk failed, 5 size cap (or a remote write without `size_after`), 6 count mismatch, 7 index state (at resume or after any chunk), 8 integrity-check failed, 9 a D1 read failed, 64 usage. Every successful run ends with `integrity-check rank=1` (#83).
 - `scripts/tsconfig.json` type-checks the backfill files with `@types/node` (added as a dev dependency). Runs as `node scripts/fts-backfill.ts`; Node 26 strips types natively.
 
 **Steps**

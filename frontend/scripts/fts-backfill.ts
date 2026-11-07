@@ -13,9 +13,18 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { EXIT, parseArgs, runBackfill, type Deps, type ExecResult, type Opts } from './fts-backfill-core.ts';
+import {
+  EXIT,
+  parseArgs,
+  parseWranglerJson,
+  runBackfill,
+  type Deps,
+  type ExecResult,
+  type Opts,
+} from './fts-backfill-core.ts';
 
 const run = promisify(execFile);
+const PROBE_TIMEOUT_MS = 10_000;
 
 function wranglerExec(opts: Opts) {
   return async (sql: string): Promise<ExecResult> => {
@@ -28,20 +37,12 @@ function wranglerExec(opts: Opts) {
       const err = e as { stdout?: string; stderr?: string; message: string };
       throw new Error(lastJsonError(err.stdout) ?? err.stderr?.trim() ?? err.message);
     }
-    const json = JSON.parse(stdout.slice(stdout.indexOf('[')));
-    const first = json[0] ?? {};
-    const meta = first.meta ?? {};
-    return {
-      rows: first.results ?? [],
-      changes: Number(meta.changes ?? 0),
-      sizeAfter: Number(meta.size_after ?? 0),
-      durationMs: Number(meta.duration ?? 0),
-    };
+    return parseWranglerJson(stdout);
   };
 }
 
 function lastJsonError(stdout?: string): string | undefined {
-  const i = stdout?.indexOf('{') ?? -1;
+  const i = stdout?.search(/^\{/m) ?? -1;
   if (!stdout || i < 0) return undefined;
   try {
     const e = JSON.parse(stdout.slice(i)).error;
@@ -61,7 +62,9 @@ async function main(): Promise<number> {
   }
   const deps: Deps = {
     exec: wranglerExec(opts),
-    probe: async (url) => (await fetch(url, { headers: { 'user-agent': 'fts-backfill' } })).status,
+    probe: async (url) =>
+      (await fetch(url, { headers: { 'user-agent': 'fts-backfill' }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) }))
+        .status,
     log: (line) => console.log(line),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
@@ -69,4 +72,7 @@ async function main(): Promise<number> {
   return (await runBackfill(deps, opts)).code;
 }
 
-process.exitCode = await main();
+process.exitCode = await main().catch((e: unknown) => {
+  console.error(`EXEC_FAILED: ${(e as Error).message}`);
+  return EXIT.EXEC_FAILED;
+});
