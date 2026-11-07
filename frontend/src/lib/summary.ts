@@ -153,15 +153,21 @@ function titleCase(s: string): string {
 /** Visible text of a markdown slice: no markers, rules, comments or images. */
 export function textContent(md: string | null | undefined): string {
   if (!md) return '';
-  return md
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(MD_IMAGE, ' ')
-    .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`#>|]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    md
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(MD_IMAGE, ' ')
+      .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      // CommonMark: a backslash ending a line is a hard break; one before ASCII
+      // punctuation is an escape. Neither belongs in plain text.
+      .replace(/\\$/gm, ' ')
+      .replace(/\\([!-/:-@[-`{-~])/g, '$1')
+      .replace(/[*_`#>|]+/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 const DANGLING = /\b(?:to|of|and|the|for|dated|between|among|&|a|an|by)$/i;
