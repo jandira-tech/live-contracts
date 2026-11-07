@@ -281,3 +281,22 @@ The old Worker's search already fails against the new schema (`no such column: e
 | AC 3.5 | Every chunk's health probe returned 200 (the script checks status, not latency) |
 | AC 3.6 | 2.294 GB, far under the 8 GB abort line |
 | 12 Post-resume ingest | **Open:** no filings on the weekend; watch Monday's batches for overload errors and rerun `integrity-check` rank 1 |
+
+### 8.1 Post-rollout assessment and review rounds (2026-11-07)
+
+- Dogfood (`dogfood-output/fts-2026-11-07/report.md`) and an impeccable critique (dual-agent, 20/40; snapshot in `.impeccable/critique/`) ran after the rollout.
+- Other-corpus reviews: crush zai/glm-5.3 on c711eda, f02db3d and each fix round. Grok (grok-4.7) runs stalled past the cap and were stopped. pi died silently twice.
+- Fix rounds, each test-first and deployed after a `--dry-run`:
+
+| Issue | What | Worker version |
+|-------|------|----------------|
+| #83 | backfill exit codes, per-chunk index check, integrity-check, size_after fail-closed | (script only) |
+| #84 | past-the-end page redirect, markdown escapes in titles | `ef340c32` |
+| #85 | HTML comments and zero-width characters in snippets | `0b64a77a` |
+| #86 | snippet column -1, non-`<mark>` hit delimiters, quote-safe ftsQuery | `4066039c` |
+| #87 | review of #83–#85 | `b9f50bb5` |
+| #88 | final review: noncharacter delimiters, blank cards, linear regexes | `a6ab002e` |
+| #89 | confirmation review: residual quadratic paths, D1Error-only INTEGRITY | `f799d37f` |
+
+- Declined with reasons (in #86 and #87): guarding the triggers against un-indexed rows, counting through the join, and rowid-changing updates.
+- Cloudflare Workers Builds fails in 0 s on every stack branch. It passed on PRs #69–#74. The build never starts, so the cause is on the Cloudflare side and its logs need a dashboard login.
