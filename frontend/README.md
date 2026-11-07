@@ -28,6 +28,8 @@ The live loaders in `src/loaders/` call those functions, which default to `getDb
   index (`exhibits_fts`, migration 0003) keyed on `exhibits.rowid`, so markdown is not stored twice.
   Every token is quoted so FTS operators in user input are literal. Snippets are computed only for
   the current page. There is no `LIKE` fallback: a missing index is an error, never a scan of 1.8 GB.
+  Measured 2026-11-07: 19,554 documents, uncached searches under 0.6 s including `a` and `agreement`,
+  database 2.29 GB with the index.
 - **Ingest** — `POST /api/ingest` (key-gated): the backend UPSERTs finalized rows into D1.
 
 ## Design system
