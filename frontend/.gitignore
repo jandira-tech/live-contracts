@@ -8,4 +8,6 @@ dist/
 auth-*.json
 .DS_Store
 **/.DS_Store
-**/**/.DS_Store
+**/**/.DS_Storefrontend/
+plugins/
+_to_delete/
