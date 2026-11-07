@@ -4,7 +4,7 @@ import { getLiveEntry } from 'astro:content';
 import type { Ex10Detail } from '../../lib/api';
 import { formatNY, formatYmd } from '../../lib/time';
 import { stripMdHead, resolveEdgarImages, displayTitle } from '../../lib/summary';
-import { marked } from 'marked';
+import { renderMarkdown } from '../../lib/render-markdown';
 
 // Live SSR via Live Content Collections: fetched at request time by id. No
 // prerender, no rebuild — every agreement is available the moment it's stored.
@@ -17,7 +17,7 @@ if (error || !detail) {
 }
 
 // Relative image refs (image-only exhibits) resolve against the EDGAR filing folder.
-const html = detail.markdown ? marked.parse(resolveEdgarImages(stripMdHead(detail.markdown), detail.filing_url)) : '';
+const html = detail.markdown ? renderMarkdown(resolveEdgarImages(stripMdHead(detail.markdown), detail.filing_url)) : '';
 const title = displayTitle(detail.description, detail.markdown) || `${detail.doc_type} — ${detail.filename}`;
 const images = detail.image_urls ?? [];
 

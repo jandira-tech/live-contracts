@@ -2,7 +2,7 @@
 import type { Ex10Summary } from '../lib/api';
 import { formatNY, formatFiledAt } from '../lib/time';
 import { displayTitle, textContent } from '../lib/summary';
-import { marked } from 'marked';
+import { renderMarkdown } from '../lib/render-markdown';
 
 interface Props { item: Ex10Summary; }
 const { item } = Astro.props;
@@ -22,7 +22,7 @@ const hasText = textContent(body).length >= 40;
 const imageRefs = Math.max((body.match(/<!--\s*\S+\.(?:jpe?g|png|gif|tiff?)\s*-->/gi) || []).length, (body.match(/^\s*(?:\*{3,}|-{3,}|_{3,})\s*$/gm) || []).length);
 const pages = item.image_urls?.length || 0;
 const snippet = (item.snippet || '').trim();
-const bodyHtml = hasText && !snippet ? marked.parse(body) : '';
+const bodyHtml = hasText && !snippet ? renderMarkdown(body) : '';
 // snippet() output is plain text plus our <mark> tags; escape everything else.
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 // Drop markdown markers from the plain-text snippet (headings, emphasis, table pipes).
