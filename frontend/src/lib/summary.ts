@@ -257,23 +257,24 @@ export function ftsQuery(input: string | null | undefined): string {
   const s = (input ?? '').trim();
   if (!s) return '';
   const parts: string[] = [];
-  const re = /"([^"]+)"|(\S+)/g;
+  // A balanced "…" is a phrase; any other quote is a token boundary (#86).
+  const re = /"([^"]+)"|([^\s"]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
-    const raw = (m[1] ?? m[2])
-      .replace(/"/g, '')
-      .replace(/[*^:()]/g, ' ')
-      .trim();
+    const raw = (m[1] ?? m[2]).replace(/[*^:()]/g, ' ').trim();
     if (raw) parts.push(`"${raw}"`);
   }
   return parts.join(' ');
 }
 
-const OPEN = '\uE000';
-const CLOSE = '\uE001';
+/** FTS5 snippet() delimiters: private-use characters, so a literal "<mark>" in a filing stays text (#86). */
+export const SNIPPET_OPEN = '\uE000';
+export const SNIPPET_CLOSE = '\uE001';
+const OPEN = SNIPPET_OPEN;
+const CLOSE = SNIPPET_CLOSE;
 
 /**
- * Render an FTS5 snippet (plain markdown text plus `<mark>` tags) as safe HTML for a card.
+ * Render an FTS5 snippet (plain markdown text with SNIPPET_OPEN/CLOSE around hits) as safe HTML for a card.
  * The tags are swapped for private-use sentinels first, so stripping markdown markers
  * cannot eat their angle brackets; everything else is escaped. `>` counts as a marker
  * only where it opens a token (blockquote), so a literal `a<b>` survives escaped.
@@ -304,8 +305,6 @@ export function snippetHtml(snippet: string | null | undefined): string {
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/\s*<!--[\s\S]*$/, '…')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/<mark>/g, OPEN)
-    .replace(/<\/mark>/g, CLOSE)
     .replace(/[#*_`|\\]+/g, '')
     .replace(/(^|\s)>+/g, '$1')
     .replace(/(^|\s)[-:\s]*-{3,}[-:\s]*(?=\s|$)/g, '$1')

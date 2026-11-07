@@ -84,7 +84,7 @@ it('ex10Search: matches body, newest first; empty query → none', async () => {
   expect(r.engine).toBe('fts');
   expect(r.total).toBe(2);
   expect(r.items[0].id).toBe('2');
-  expect(r.items[0].snippet).toContain('<mark>leasing</mark>');
+  expect(r.items[0].snippet).toContain('\uE000leasing\uE001');
   expect((await ex10Search('   ', 1, 20, db)).total).toBe(0);
 });
 it('ex10Search: FTS operators in user input are literal, phrases stay phrases', async () => {
@@ -124,6 +124,8 @@ it('ex10Search: a description-only match is found and keeps its title data', asy
   const r = await ex10Search('omega', 1, 20, db);
   expect(r.items.map((i) => i.id)).toEqual(['7']);
   expect(r.items[0].excerpt_md).toContain('nothing relevant');
+  // The snippet comes from the column that matched, so the hit is marked (#86).
+  expect(r.items[0].snippet).toContain('\uE000Omega\uE001');
 });
 it('ex10Facets / ex10Stats', async () => {
   const f = await ex10Facets(db);
