@@ -1,0 +1,149 @@
+# astro:i18n Helper Functions
+
+## Import
+
+```javascript
+import {
+  getRelativeLocaleUrl,
+  getAbsoluteLocaleUrl,
+  getRelativeLocaleUrlList,
+  getAbsoluteLocaleUrlList,
+  getPathByLocale,
+  getLocaleByPath
+} from 'astro:i18n';
+```
+
+## URL Generation
+
+### getRelativeLocaleUrl(locale, path?, options?)
+
+Returns a relative URL for a locale. Respects routing strategy.
+
+```astro
+---
+import { getRelativeLocaleUrl } from 'astro:i18n';
+
+const itAbout = getRelativeLocaleUrl('it', 'about');    // /it/about
+const itHome = getRelativeLocaleUrl('it');              // /it/
+const enAbout = getRelativeLocaleUrl('en', 'about');    // /about (no prefix)
+---
+
+<a href={getRelativeLocaleUrl('it', 'blog')}>Blog IT</a>
+```
+
+### getAbsoluteLocaleUrl(locale, path?, options?)
+
+Returns an absolute URL. Requires `site` configured in `astro.config.mjs`.
+
+```javascript
+getAbsoluteLocaleUrl('it', 'about')
+// → https://example.com/it/about
+```
+
+### getRelativeLocaleUrlList(path?, options?)
+
+Returns relative URLs for ALL configured locales.
+
+```javascript
+getRelativeLocaleUrlList('about')
+// → ['/about', '/it/about', '/es/about']
+```
+
+### getAbsoluteLocaleUrlList(path?, options?)
+
+Returns absolute URLs for ALL configured locales. Used for hreflang generation.
+
+```javascript
+getAbsoluteLocaleUrlList('about')
+// → ['https://example.com/about', 'https://example.com/it/about']
+```
+
+## Locale Mapping
+
+### getPathByLocale(locale)
+
+Returns the URL path segment for a locale.
+
+```javascript
+getPathByLocale('it')  // → 'it'
+```
+
+### getLocaleByPath(path)
+
+Returns the locale for a given path segment.
+
+```javascript
+getLocaleByPath('it')  // → 'it'
+```
+
+## Options Parameter
+
+All URL helpers accept an options object:
+
+```typescript
+interface GetLocaleOptions {
+  prependWith?: string;  // Add prefix to all paths
+  normalizeLocale?: boolean;  // Normalize locale code (default: true)
+}
+```
+
+## Active Link Detection
+
+Unlike some frameworks that strip the locale from the routable path, Astro **keeps the locale prefix** in `Astro.url.pathname` (e.g. `/it/about`). A naive `pathname === href` comparison breaks active-link highlighting once i18n is added — the helper below strips the locale prefix and the trailing slash before comparing, and treats the locale-root path as an exact match for the home link.
+
+```typescript
+// src/utils/isActiveLink.ts
+
+/**
+ * Determines whether a nav link matches the current path, ignoring the
+ * i18n locale prefix and trailing slash. The home link ('/') is matched
+ * exactly (locale root only), everything else via prefix match.
+ */
+export function isActiveLink(pathname: string, href: string): boolean {
+  const strip = (p: string) => p.replace(/^\/[a-z]{2}(?=\/|$)/, '').replace(/\/$/, '') || '/';
+  const currentPath = strip(pathname);
+  const targetPath = strip(href);
+
+  return targetPath === '/' ? currentPath === '/' : currentPath.startsWith(targetPath);
+}
+```
+
+```astro
+---
+import { isActiveLink } from '../utils/isActiveLink';
+
+const links = [
+  { href: getRelativeLocaleUrl(lang), label: 'Home' },
+  { href: getRelativeLocaleUrl(lang, 'about'), label: 'About' }
+];
+---
+
+<nav>
+  {links.map(({ href, label }) => (
+    <a href={href} aria-current={isActiveLink(Astro.url.pathname, href) ? 'page' : undefined}>
+      {label}
+    </a>
+  ))}
+</nav>
+```
+
+## Usage in Layout for Alternate Links
+
+```astro
+---
+import { getAbsoluteLocaleUrlList } from 'astro:i18n';
+
+const currentPath = Astro.url.pathname.replace(/^\/[a-z]{2}(?=\/|$)/, '') || '/';
+const locales = ['en', 'it', 'es'];
+---
+
+<head>
+  {locales.map(locale => (
+    <link
+      rel="alternate"
+      hreflang={locale}
+      href={getAbsoluteLocaleUrl(locale, currentPath)}
+    />
+  ))}
+</head>
+```

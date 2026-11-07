@@ -24,11 +24,30 @@ async function check(name, path, ...needles) {
 }
 
 await check('homepage live feed', '/', '/ Live contracts', '/ Latest agreements', 'class="sl-feed"');
-await check('navbar wordmark', '/', 'href="https://arthur.law/"', 'ARTHUR<i>.</i>SOUZA<i>.</i>RODRIGUES', 'class="mbar"');
+await check(
+  'navbar wordmark',
+  '/',
+  'href="https://arthur.law/"',
+  'ARTHUR<i>.</i>SOUZA<i>.</i>RODRIGUES',
+  'class="mbar"',
+);
 await check('archive pagination', '/agreements/1', 'agreements</h1>', 'class="pagination"', 'class="sl-filters-col"');
 await check('detail markdown shell', '/agreement/103', 'class="prose"', 'View original filing');
 await check('search page form', '/search', 'class="sl-search-row', 'role="search"');
 await check('search results', '/search?q=agreement', 'results for', 'class="sl-doc"');
+{
+  // A page past the end redirects to the last page instead of "N results" over "No matches" (#84).
+  const first = await (await fetch(`${BASE}/search?q=agreement`)).text();
+  const last = first.match(/class="current">1 \/ (\d+)</)?.[1];
+  const res = await fetch(`${BASE}/search?q=agreement&page=99999`, { redirect: 'manual' });
+  const loc = res.headers.get('location') ?? '';
+  if (last && res.status === 302 && loc.endsWith(`/search?q=agreement&page=${last}`)) {
+    console.log(`✓ search page past the end redirects (${loc})`);
+  } else {
+    failures += 1;
+    console.error(`✗ search page past the end: status=${res.status} location=${loc}`);
+  }
+}
 
 if (failures) {
   console.error(`\n${failures} smoke check(s) failed`);

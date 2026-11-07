@@ -54,3 +54,6 @@ secinfra-rust
 .claude/worktrees/
 **/**/.DS_Store
 .DS_Store
+dist/
+_to_delete/
+plugins/

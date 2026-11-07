@@ -8,8 +8,15 @@ const LEADING_LABEL = /^\s*(?:(?:exhibit|ex)[\s.-]*\d+(?:\.\d+)?\b\s*)+/i;
 export function cleanExcerpt(text: string | null | undefined, limit = 1000): string {
   if (!text) return '';
   let s = text.replace(/\|/g, ' ').replace(IMG_REF, ' ').replace(MD_MARKERS, '');
-  s = s.replace(/-{2,}/g, ' ').replace(/[ \t]+/g, ' ').replace(/[ \t]*\n[ \t]*/g, '\n');
-  s = s.replace(/\n{2,}/g, '\n').trim().replace(LEADING_LABEL, '').trim();
+  s = s
+    .replace(/-{2,}/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n');
+  s = s
+    .replace(/\n{2,}/g, '\n')
+    .trim()
+    .replace(LEADING_LABEL, '')
+    .trim();
   if (s.length <= limit) return s;
   const cut = s.slice(0, limit);
   // Prefer ending on a clean boundary: a sentence/line end in the latter part of
@@ -38,7 +45,8 @@ export function stripMdHead(md: string | null | undefined): string {
 // anyway) and the redundant leading "Exhibit 10.x" label (the whole site is
 // EX-10). Stripped from the *snippet* only; the detail page keeps the full doc.
 const MD_IMAGE = /!\[[^\]]*\]\([^)]*\)/g;
-const LEADING_EXHIBIT = /^[ \t]*(?:#{1,6}[ \t]*)?\**[ \t]*(?:exhibit|ex)\b[ \t.-]*\d+(?:\.\d+)?[ \t]*\**[ \t]*(?:\r?\n+|$)/i;
+const LEADING_EXHIBIT =
+  /^[ \t]*(?:#{1,6}[ \t]*)?\**[ \t]*(?:exhibit|ex)\b[ \t.-]*\d+(?:\.\d+)?[ \t]*\**[ \t]*(?:\r?\n+|$)/i;
 
 // A *markdown* excerpt for the visual cards: a leading slice of the real markdown
 // (markers intact), cleaned of the noise above and cut on a block boundary so
@@ -49,7 +57,10 @@ export function markdownExcerpt(md: string | null | undefined, limit = 1600): st
   if (!s) return '';
   s = s.replace(MD_IMAGE, '').replace(/\[\]\([^)]*\)/g, ''); // images + emptied links
   for (let i = 0; i < 3 && LEADING_EXHIBIT.test(s); i++) s = s.replace(LEADING_EXHIBIT, '');
-  s = s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim(); // collapse excessive newlines
+  s = s
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim(); // collapse excessive newlines
   if (!s) return '';
   if (s.length <= limit) return s;
   const cut = s.slice(0, limit);
@@ -64,13 +75,21 @@ export function markdownExcerpt(md: string | null | undefined, limit = 1600): st
 
 export function parseFiling(raw: string | null | undefined): Record<string, unknown> {
   if (!raw) return {};
-  try { const v = JSON.parse(raw); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
-  catch { return {}; }
+  try {
+    const v = JSON.parse(raw);
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch {
+    return {};
+  }
 }
 export function parseImageUrls(raw: string | null | undefined): string[] {
   if (!raw) return [];
-  try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(String) : []; }
-  catch { return []; }
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.map(String) : [];
+  } catch {
+    return [];
+  }
 }
 
 // Filing JSON values are `unknown`. Only primitives have a defined string form;
@@ -83,20 +102,27 @@ function textOf(v: unknown): string {
 export function rowToSummary(r: Partial<ExhibitRow>): Ex10Summary {
   const filing = parseFiling(r.filingMetadata ?? null);
   return {
-    id: String(r.id ?? ''), accession: r.accession ?? '', cik: r.cik ?? '',
-    form_type: r.formType ?? '', doc_type: r.docType ?? '', filename: r.filename ?? '',
-    description: r.description ?? '', filing_url: r.filingUrl ?? '', found_at: r.foundAt ?? '',
+    id: String(r.id ?? ''),
+    accession: r.accession ?? '',
+    cik: r.cik ?? '',
+    form_type: r.formType ?? '',
+    doc_type: r.docType ?? '',
+    filename: r.filename ?? '',
+    description: r.description ?? '',
+    filing_url: r.filingUrl ?? '',
+    found_at: r.foundAt ?? '',
     markdown_status: r.markdownStatus ?? '',
-    excerpt: cleanExcerpt(r.markdown, 1000), excerpt_md: markdownExcerpt(r.markdown),
+    excerpt: cleanExcerpt(r.markdown, 1000),
+    excerpt_md: markdownExcerpt(r.markdown),
     has_markdown: Boolean(r.markdown),
-    company_name: textOf(filing.company_name), period: textOf(filing.period),
+    company_name: textOf(filing.company_name),
+    period: textOf(filing.period),
     location: textOf(filing.location),
     items: Array.isArray(filing.items) ? (filing.items as string[]) : [],
     filed_at: r.filedAt ?? textOf(filing.filed_at),
     image_urls: parseImageUrls(r.imageUrls ?? null),
   };
 }
-
 
 // ---------------------------------------------------------------------------
 // Card headline. The SEC `description` is usually just the exhibit label
@@ -108,40 +134,68 @@ export function isLabelOnly(description: string | null | undefined): boolean {
   return LABEL_ONLY.test(description ?? '');
 }
 
-const TITLE_WORDS = /\b(AGREEMENT|AMENDMENT|NOTE|LEASE|WARRANT|INDENTURE|GUARANTY|GUARANTEE|PLAN|LETTER|CONSENT|WAIVER|RELEASE|CERTIFICATE|LICENSE|SUBLEASE|ASSIGNMENT|JOINDER|SUPPLEMENT|TERMS|CONTRACT|ARRANGEMENT|DEED|UNDERTAKING|OFFER|MEMORANDUM|SCHEDULE)\b/i;
+const TITLE_WORDS =
+  /\b(AGREEMENT|AMENDMENT|NOTE|LEASE|WARRANT|INDENTURE|GUARANTY|GUARANTEE|PLAN|LETTER|CONSENT|WAIVER|RELEASE|CERTIFICATE|LICENSE|SUBLEASE|ASSIGNMENT|JOINDER|SUPPLEMENT|TERMS|CONTRACT|ARRANGEMENT|DEED|UNDERTAKING|OFFER|MEMORANDUM|SCHEDULE)\b/i;
 const TITLE_CUT = /\s*(?:\(|“|"|dated|made|entered|is made|by and|between|among|this|has not)\b.*$/i;
 const SMALL = new Set(['of', 'and', 'the', 'to', 'for', 'in', 'by', 'or', 'a', 'an', 'as', 'at', 'on', 'with']);
 function titleCase(s: string): string {
-  return s.toLowerCase().split(/\s+/).map((w, i) => {
-    if (i > 0 && SMALL.has(w)) return w;
-    if (/^\d/.test(w)) return w;
-    return w.charAt(0).toUpperCase() + w.slice(1);
-  }).join(' ');
+  return s
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w, i) => {
+      if (i > 0 && SMALL.has(w)) return w;
+      if (/^\d/.test(w)) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1);
+    })
+    .join(' ');
 }
 
 /** Visible text of a markdown slice: no markers, rules, comments or images. */
 export function textContent(md: string | null | undefined): string {
   if (!md) return '';
-  return md
-    .replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]+>/g, ' ')
-    .replace(MD_IMAGE, ' ').replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_`#>|]+/g, '').replace(/\s+/g, ' ').trim();
+  return (
+    md
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(MD_IMAGE, ' ')
+      .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      // CommonMark: a backslash before a newline is a hard break; one before ASCII
+      // punctuation is an escape, so the character is kept even when it is a
+      // marker (`aspi\_ex101.htm`). Unescaped markers are dropped in the same pass.
+      .replace(/\\(?=\r?\n)/g, ' ')
+      .replace(/\\([!-/:-@[-`{-~])|[*_`#>|]+/g, (_m, esc: string | undefined) => esc ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 const DANGLING = /\b(?:to|of|and|the|for|dated|between|among|&|a|an|by)$/i;
 const SENTENCE = /\b(?:is|are|has|was|were|hereby|made|entered|shall|agrees?)\b/i;
 const CORP = /\b(?:inc|llc|l\.?p|corp|corporation|company|co|ltd|plc|n\.?a)\.?,?$/i;
-const DATE_LINE = /^(?:(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4})$/i;
+const DATE_LINE =
+  /^(?:(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4})$/i;
 const GENERIC = /^(?:agreement|amendment|note|plan|letter|contract|exhibit)$/i;
 
-export function displayTitle(description: string | null | undefined, markdown: string | null | undefined, max = 90): string {
+export function displayTitle(
+  description: string | null | undefined,
+  markdown: string | null | undefined,
+  max = 90,
+): string {
   const desc = (description ?? '').trim();
   if (!isLabelOnly(desc)) return desc === desc.toUpperCase() && desc.split(/\s+/).length > 2 ? titleCase(desc) : desc;
   const fallback = desc || 'EX-10';
-  let body = stripMdHead(markdown).replace(MD_IMAGE, '');
+  // A hard break (`\` before a newline) splits one heading over two lines; drop the
+  // backslash here so the per-line pass below can re-join them.
+  let body = stripMdHead(markdown)
+    .replace(MD_IMAGE, '')
+    .replace(/\\(?=\r?\n)/g, '');
   for (let i = 0; i < 3 && LEADING_EXHIBIT.test(body); i++) body = body.replace(LEADING_EXHIBIT, '');
-  const raw = body.split('\n').map((l) => textContent(l)).filter(Boolean).slice(0, 14);
+  const raw = body
+    .split('\n')
+    .map((l) => textContent(l))
+    .filter(Boolean)
+    .slice(0, 14);
   // Re-join a heading that wrapped after a preposition ("NINTH AMENDMENT TO" / "CREDIT AGREEMENT").
   const lines: string[] = [];
   for (const l of raw) {
@@ -150,7 +204,8 @@ export function displayTitle(description: string | null | undefined, markdown: s
     else lines.push(l);
   }
   const clean = (t: string) => titleCase(t.replace(/[.:;,]+$/, '').trim());
-  const standalone = (l: string) => l.length <= max && !DANGLING.test(l) && !SENTENCE.test(l) && !/^(?:this|the)\b/i.test(l);
+  const standalone = (l: string) =>
+    l.length <= max && !DANGLING.test(l) && !SENTENCE.test(l) && !/^(?:this|the)\b/i.test(l);
   // 1) a short standalone line that names the instrument ("CREDIT AGREEMENT").
   for (const l of lines) {
     if (standalone(l) && TITLE_WORDS.test(l) && !GENERIC.test(l)) return clean(l);
@@ -162,14 +217,25 @@ export function displayTitle(description: string | null | undefined, markdown: s
   }
   // 3) an inline opener ("THIS CONTRACTOR SERVICES AGREEMENT (the ...) is made ...").
   for (const l of lines) {
-    const m = l.match(/^(?:this\s+)?([A-Z][A-Z0-9 .,&'\-/]{3,}?\b(?:AGREEMENT|NOTE|LEASE|WARRANT|PLAN|LETTER|AMENDMENT|INDENTURE|GUARANTY)\b)/i);
+    const m = l.match(
+      /^(?:this\s+)?([A-Z][A-Z0-9 .,&'\-/]{3,}?\b(?:AGREEMENT|NOTE|LEASE|WARRANT|PLAN|LETTER|AMENDMENT|INDENTURE|GUARANTY)\b)/i,
+    );
     if (m) {
       const t = m[1].replace(TITLE_CUT, '').trim();
-      if (t.length >= 8 && t.length <= max && t === t.toUpperCase() && !GENERIC.test(t) && !DANGLING.test(t)) return titleCase(t);
+      if (t.length >= 8 && t.length <= max && t === t.toUpperCase() && !GENERIC.test(t) && !DANGLING.test(t))
+        return titleCase(t);
     }
   }
   // 4) first heading-like line that is not a sentence, a date, or a party name.
-  const first = lines.find((l) => l.length >= 4 && standalone(l) && !/[.!?]\s/.test(l) && !DATE_LINE.test(l) && !CORP.test(l) && !/^dear\b/i.test(l));
+  const first = lines.find(
+    (l) =>
+      l.length >= 4 &&
+      standalone(l) &&
+      !/[.!?]\s/.test(l) &&
+      !DATE_LINE.test(l) &&
+      !CORP.test(l) &&
+      !/^dear\b/i.test(l),
+  );
   return first ? clean(first) : fallback;
 }
 
@@ -195,11 +261,95 @@ export function ftsQuery(input: string | null | undefined): string {
   const s = (input ?? '').trim();
   if (!s) return '';
   const parts: string[] = [];
-  const re = /"([^"]+)"|(\S+)/g;
+  // A quote opens a phrase only at the start or after whitespace, "(" or "[";
+  // any other quote is a token boundary (#86, #88: O"Neil must not open one).
+  const re = /(?:^|(?<=[\s([]))"([^"]+)"|([^\s"]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
-    const raw = (m[1] ?? m[2]).replace(/"/g, '').replace(/[*^:()]/g, ' ').trim();
+    const raw = (m[1] ?? m[2]).replace(/[*^:()[\]]/g, ' ').trim();
     if (raw) parts.push(`"${raw}"`);
   }
   return parts.join(' ');
+}
+
+/**
+ * FTS5 snippet() delimiters. Unicode noncharacters, which are not for interchange:
+ * a literal "<mark>" (#86) or a private-use glyph from a Wingdings conversion (#88)
+ * in a filing stays text.
+ */
+export const SNIPPET_OPEN = '\uFDD0';
+export const SNIPPET_CLOSE = '\uFDD1';
+const OPEN = SNIPPET_OPEN;
+const CLOSE = SNIPPET_CLOSE;
+
+/** Drop a close sentinel with no open one and close one left open, before the end ellipsis. */
+function balanceMarks(text: string): string {
+  let open = false;
+  let out = '';
+  for (const ch of text) {
+    if (ch === OPEN) {
+      if (open) continue;
+      open = true;
+    } else if (ch === CLOSE) {
+      if (!open) continue;
+      open = false;
+    }
+    out += ch;
+  }
+  if (!open) return out;
+  return out.endsWith('…') ? `${out.slice(0, -1).trimEnd()}${CLOSE}…` : `${out.trimEnd()}${CLOSE}`;
+}
+
+/** Remove `<!-- … -->` in one pass; an unterminated one cuts the text with "…" (#88, #89). */
+function stripComments(t: string): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const open = t.indexOf('<!--', i);
+    if (open < 0) return out + t.slice(i);
+    const close = t.indexOf('-->', open + 4);
+    if (close < 0) return `${(out + t.slice(i, open)).trimEnd()}…`;
+    out += `${t.slice(i, open)} `;
+    i = close + 3;
+  }
+}
+
+/**
+ * Render an FTS5 snippet (plain markdown text with SNIPPET_OPEN/CLOSE around hits) as safe HTML for a card.
+ * The tags are swapped for private-use sentinels first, so stripping markdown markers
+ * cannot eat their angle brackets; everything else is escaped. `>` counts as a marker
+ * only where it opens a token (blockquote), so a literal `a<b>` survives escaped.
+ */
+
+export function snippetHtml(snippet: string | null | undefined): string {
+  const tidy = (t: string) =>
+    t
+      .replace(new RegExp(`${OPEN}\\s*${CLOSE}`, 'g'), ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  // Zero-width characters first: one inside `<!--` would hide the comment.
+  // HTML comments (Workiva/Wdesk banners) and Word downlevel fragments are not text.
+  let t = (snippet ?? '').replace(/[\u200B-\u200D\uFEFF]/g, '');
+  // A snippet starting with "…" can start inside a comment: drop only its closing
+  // marker, so a stray "-->" in prose never costs the words before it (#87).
+  const lead = t.startsWith('…') ? t.indexOf('-->') : -1;
+  if (lead >= 0 && !t.slice(0, lead).includes('<!--')) t = `${t.slice(0, lead)} ${t.slice(lead + 3)}`;
+  t = stripComments(t).replace(/<!\[(?:if[^\]]*|endif)\](?:--)?>/gi, ' ');
+  t = t
+    .replace(/[#*_`|\\]+/g, '')
+    // Blockquote markers exist only at line starts; a mid-sentence ">" is text.
+    .replace(/(^|\n)[ \t]*>+/g, '$1');
+  // Table rules and lone dashes, token by token (a regex over runs is quadratic).
+  t = t
+    .split(/(\s+)/)
+    .filter((tok) => tok !== '-' && !/^[-:]*-{3,}[-:]*$/.test(tok))
+    .join('');
+  const html = tidy(balanceMarks(tidy(t)));
+  if (!html.replace(new RegExp(`[…\\s${OPEN}${CLOSE}]`, 'g'), '')) return '';
+  return html
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(new RegExp(OPEN, 'g'), '<mark class="sl-mark">')
+    .replace(new RegExp(CLOSE, 'g'), '</mark>');
 }
