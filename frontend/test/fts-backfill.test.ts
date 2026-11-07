@@ -362,6 +362,23 @@ describe('execFailure: mapping a failed wrangler run (#89 follow-up)', () => {
     expect(execFailure(undefined, '  ', 'Command failed').message).toBe('Command failed');
   });
 
+  it('keeps looking past junk objects and unclosed braces (#89 review)', () => {
+    expect(execFailure(`{"not":"error"}\n${d1Json}`, '', 'x')).toBeInstanceOf(D1Error);
+    expect(execFailure(`{\n${d1Json}`, '', 'x')).toBeInstanceOf(D1Error);
+  });
+
+  it('tolerates a non-array notes field', () => {
+    const e = execFailure('{"error":{"text":"database disk image is malformed","notes":"oops"}}', '', 'x');
+    expect(e).toBeInstanceOf(D1Error);
+    expect(e.message).toBe('database disk image is malformed');
+  });
+
+  it('stays linear on many unclosed braces', () => {
+    const t0 = performance.now();
+    expect(execFailure('{\n'.repeat(100_000), 'stderr', 'x')).not.toBeInstanceOf(D1Error);
+    expect(performance.now() - t0).toBeLessThan(300);
+  });
+
   it('feeds INTEGRITY end to end only for the D1 path', async () => {
     const run = async (err: Error) => {
       const f = fakeD1({ rows: ids(7), index: [], integrityError: 'unused' });
