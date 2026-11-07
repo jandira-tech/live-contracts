@@ -379,6 +379,19 @@ describe('execFailure: mapping a failed wrangler run (#89 follow-up)', () => {
     expect(performance.now() - t0).toBeLessThan(300);
   });
 
+  it('pins the scan budget: a few unclosed braces pass, many give up', () => {
+    // Each unclosed brace scans from its line to the end of the text.
+    const pad = (n: number) => `{${' '.repeat(20_000)}\n`.repeat(n);
+    expect(execFailure(`${pad(2)}${d1Json}`, '', 'x')).toBeInstanceOf(D1Error);
+    expect(execFailure(`${pad(20)}${d1Json}`, '', 'x')).not.toBeInstanceOf(D1Error);
+  });
+
+  it('ignores a non-string text and falls back to stderr', () => {
+    const e = execFailure('{"error":{"text":5}}', 'from stderr', 'x');
+    expect(e).not.toBeInstanceOf(D1Error);
+    expect(e.message).toBe('from stderr');
+  });
+
   it('feeds INTEGRITY end to end only for the D1 path', async () => {
     const run = async (err: Error) => {
       const f = fakeD1({ rows: ids(7), index: [], integrityError: 'unused' });
