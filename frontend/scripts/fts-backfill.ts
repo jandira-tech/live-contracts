@@ -1,42 +1,72 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
- * One-off, resumable backfill of the FTS5 index (migration 0003) for rows that
- * existed before the triggers did. Runs through wrangler so it works against the
- * local miniflare D1 and the remote database alike, in chunks small enough for
- * D1's per-statement limits. Re-running is safe: it only indexes missing ids.
+ * Backfill the FTS5 index (migration 0003) for rows that predate its triggers.
+ * Runs `wrangler d1 execute` with an argument array (never a shell string), one
+ * chunk at a time. Logic and safety checks live in fts-backfill-core.ts.
  *
- *   bun run db:fts-backfill            # local
- *   bun run db:fts-backfill -- --remote
- *   bun run db:fts-backfill -- --remote --env staging
+ *   pnpm db:fts-backfill -- --remote --to <max rowid>          # production, producer stopped
+ *   pnpm db:fts-backfill -- --remote --to <M> --from <last hi>  # resume after an abort
+ *   pnpm db:fts-backfill -- --local [--persist-to <dir>]        # local miniflare D1
+ *
+ * Try `INSERT INTO exhibits_fts(exhibits_fts) VALUES('rebuild')` first: it is one
+ * atomic statement and rolls back cleanly if it exceeds D1's time budget.
  */
-const args = process.argv.slice(2);
-const remote = args.includes('--remote');
-const envIdx = args.indexOf('--env');
-const env = envIdx >= 0 ? args[envIdx + 1] : undefined;
-const CHUNK = Number(process.env.FTS_CHUNK ?? 250);
-const DB = env === 'staging' ? 'sec-ex10-staging' : 'sec-ex10';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { EXIT, parseArgs, runBackfill, type Deps, type ExecResult, type Opts } from './fts-backfill-core.ts';
 
-const SQL = `INSERT INTO exhibits_fts(id, description, markdown)
-  SELECT e.id, coalesce(e.description, ''), coalesce(e.markdown, '')
-  FROM exhibits e WHERE NOT EXISTS (SELECT 1 FROM exhibits_fts f WHERE f.id = e.id)
-  ORDER BY e.id LIMIT ${CHUNK}`;
+const run = promisify(execFile);
 
-async function run(): Promise<number> {
-  const cmd = ['bunx', 'wrangler', 'd1', 'execute', DB, remote ? '--remote' : '--local', '--json', '--command', SQL];
-  if (env) cmd.push('--env', env);
-  const proc = Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe' });
-  const out = await new Response(proc.stdout).text();
-  const err = await new Response(proc.stderr).text();
-  if ((await proc.exited) !== 0) throw new Error(err || out);
-  const json = JSON.parse(out.slice(out.indexOf('[')));
-  return Number(json?.[0]?.meta?.changes ?? 0);
+function wranglerExec(opts: Opts) {
+  return async (sql: string): Promise<ExecResult> => {
+    const args = ['exec', 'wrangler', 'd1', 'execute', opts.db, `--${opts.mode}`, '--json', '--command', sql];
+    if (opts.persistTo) args.push('--persist-to', opts.persistTo);
+    let stdout: string;
+    try {
+      ({ stdout } = await run('pnpm', args, { maxBuffer: 64 * 1024 * 1024 }));
+    } catch (e) {
+      const err = e as { stdout?: string; stderr?: string; message: string };
+      throw new Error(lastJsonError(err.stdout) ?? err.stderr?.trim() ?? err.message);
+    }
+    const json = JSON.parse(stdout.slice(stdout.indexOf('[')));
+    const first = json[0] ?? {};
+    const meta = first.meta ?? {};
+    return {
+      rows: first.results ?? [],
+      changes: Number(meta.changes ?? 0),
+      sizeAfter: Number(meta.size_after ?? 0),
+      durationMs: Number(meta.duration ?? 0),
+    };
+  };
 }
 
-let total = 0;
-for (;;) {
-  const n = await run();
-  total += n;
-  console.log(`indexed ${n} (total ${total})`);
-  if (n < CHUNK) break;
+function lastJsonError(stdout?: string): string | undefined {
+  const i = stdout?.indexOf('{') ?? -1;
+  if (!stdout || i < 0) return undefined;
+  try {
+    const e = JSON.parse(stdout.slice(i)).error;
+    return [e?.text, ...(e?.notes ?? []).map((n: { text: string }) => n.text)].filter(Boolean).join(': ');
+  } catch {
+    return undefined;
+  }
 }
-console.log(`done: ${total} rows added to exhibits_fts`);
+
+async function main(): Promise<number> {
+  let opts: Opts;
+  try {
+    opts = parseArgs(process.argv.slice(2).filter((a: string) => a !== '--'));
+  } catch (e) {
+    console.error((e as Error).message);
+    return EXIT.USAGE;
+  }
+  const deps: Deps = {
+    exec: wranglerExec(opts),
+    probe: async (url) => (await fetch(url, { headers: { 'user-agent': 'fts-backfill' } })).status,
+    log: (line) => console.log(line),
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  };
+  console.log(`backfill ${opts.db} (${opts.mode}) from=${opts.from} to=${opts.to ?? 'max(rowid)'} chunk=${opts.chunk}`);
+  return (await runBackfill(deps, opts)).code;
+}
+
+process.exitCode = await main();
