@@ -160,11 +160,11 @@ export function textContent(md: string | null | undefined): string {
       .replace(MD_IMAGE, ' ')
       .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
       .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-      // CommonMark: a backslash ending a line is a hard break; one before ASCII
-      // punctuation is an escape. Neither belongs in plain text.
-      .replace(/\\$/gm, ' ')
-      .replace(/\\([!-/:-@[-`{-~])/g, '$1')
-      .replace(/[*_`#>|]+/g, '')
+      // CommonMark: a backslash before a newline is a hard break; one before ASCII
+      // punctuation is an escape, so the character is kept even when it is a
+      // marker (`aspi\_ex101.htm`). Unescaped markers are dropped in the same pass.
+      .replace(/\\(?=\r?\n)/g, ' ')
+      .replace(/\\([!-/:-@[-`{-~])|[*_`#>|]+/g, (_m, esc: string | undefined) => esc ?? '')
       .replace(/\s+/g, ' ')
       .trim()
   );
@@ -185,7 +185,11 @@ export function displayTitle(
   const desc = (description ?? '').trim();
   if (!isLabelOnly(desc)) return desc === desc.toUpperCase() && desc.split(/\s+/).length > 2 ? titleCase(desc) : desc;
   const fallback = desc || 'EX-10';
-  let body = stripMdHead(markdown).replace(MD_IMAGE, '');
+  // A hard break (`\` before a newline) splits one heading over two lines; drop the
+  // backslash here so the per-line pass below can re-join them.
+  let body = stripMdHead(markdown)
+    .replace(MD_IMAGE, '')
+    .replace(/\\(?=\r?\n)/g, '');
   for (let i = 0; i < 3 && LEADING_EXHIBIT.test(body); i++) body = body.replace(LEADING_EXHIBIT, '');
   const raw = body
     .split('\n')
@@ -273,12 +277,6 @@ export const SNIPPET_CLOSE = '\uE001';
 const OPEN = SNIPPET_OPEN;
 const CLOSE = SNIPPET_CLOSE;
 
-/**
- * Render an FTS5 snippet (plain markdown text with SNIPPET_OPEN/CLOSE around hits) as safe HTML for a card.
- * The tags are swapped for private-use sentinels first, so stripping markdown markers
- * cannot eat their angle brackets; everything else is escaped. `>` counts as a marker
- * only where it opens a token (blockquote), so a literal `a<b>` survives escaped.
- */
 /** Drop a close sentinel with no open one and close one left open, before the end ellipsis. */
 function balanceMarks(text: string): string {
   let open = false;
@@ -297,21 +295,38 @@ function balanceMarks(text: string): string {
   return out.endsWith('…') ? `${out.slice(0, -1).trimEnd()}${CLOSE}…` : `${out.trimEnd()}${CLOSE}`;
 }
 
+/**
+ * Render an FTS5 snippet (plain markdown text with SNIPPET_OPEN/CLOSE around hits) as safe HTML for a card.
+ * The tags are swapped for private-use sentinels first, so stripping markdown markers
+ * cannot eat their angle brackets; everything else is escaped. `>` counts as a marker
+ * only where it opens a token (blockquote), so a literal `a<b>` survives escaped.
+ */
 export function snippetHtml(snippet: string | null | undefined): string {
-  const plain = (snippet ?? '')
-    // HTML comments (Workiva/Wdesk banners) are not text. A snippet that starts
-    // with "…" can begin inside one, and any snippet can end inside one.
-    .replace(/^…(?:(?!<!--)[\s\S])*?-->\s*/, '…')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/\s*<!--[\s\S]*$/, '…')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/[#*_`|\\]+/g, '')
-    .replace(/(^|\s)>+/g, '$1')
-    .replace(/(^|\s)[-:\s]*-{3,}[-:\s]*(?=\s|$)/g, '$1')
-    .replace(/(^|\s)-(?=\s|$)/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return balanceMarks(plain)
+  const tidy = (t: string) =>
+    t
+      .replace(new RegExp(`${OPEN}\\s*${CLOSE}`, 'g'), ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const plain = tidy(
+    (snippet ?? '')
+      // Zero-width characters first: one inside `<!--` would hide the comment.
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      // HTML comments (Workiva/Wdesk banners) and Word downlevel fragments are
+      // not text. A snippet can end inside a comment; one that starts with "…"
+      // can start inside one, and then only its closing marker is dropped, so a
+      // stray "-->" in prose never costs the words before it.
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<!\[(?:if[^\]]*|endif)\](?:--)?>/gi, ' ')
+      .replace(/^(…(?:(?!<!--)[\s\S])*?)\s*-->/, '$1 ')
+      .replace(/\s*<!--[\s\S]*$/, '…')
+      .replace(/[#*_`|\\]+/g, '')
+      .replace(/(^|\s)>+/g, '$1')
+      .replace(/(^|\s)[-:\s]*-{3,}[-:\s]*(?=\s|$)/g, '$1')
+      .replace(/(^|\s)-(?=\s|$)/g, '$1'),
+  );
+  const html = tidy(balanceMarks(plain));
+  if (!html.replace(new RegExp(`[…\\s${OPEN}${CLOSE}]`, 'g'), '')) return '';
+  return html
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

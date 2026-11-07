@@ -91,7 +91,7 @@ export function parseArgs(argv: string[]): Opts {
     }
     if (a === '--remote' || a === '--local') {
       const m = a === '--remote' ? 'remote' : 'local';
-      if (mode && mode !== m) throw usage('choose one of --remote or --local');
+      if (mode) throw usage(mode === m ? `${a} given twice` : 'choose one of --remote or --local');
       mode = m;
     } else if (a === '--to') o.to = int('--to', val(), 0, Number.MAX_SAFE_INTEGER);
     else if (a === '--from') o.from = int('--from', val(), 0, Number.MAX_SAFE_INTEGER);
@@ -216,8 +216,17 @@ async function backfill(
   try {
     await deps.exec(INTEGRITY_CHECK);
   } catch (e) {
-    log(`INTEGRITY: integrity-check failed: ${(e as Error).message}. Run ${RESET} and restart from 0.`);
-    return { code: EXIT.INTEGRITY, lastHi };
+    const msg = (e as Error).message;
+    // Only a rejection of the index is INTEGRITY. A CPU limit or a lost response
+    // says nothing about the index, and delete-all would wipe a healthy one.
+    if (/malformed|corrupt/i.test(msg)) {
+      log(`INTEGRITY: integrity-check failed: ${msg}. Run ${RESET} and restart from 0.`);
+      return { code: EXIT.INTEGRITY, lastHi };
+    }
+    log(
+      `EXEC_FAILED: integrity-check did not finish: ${msg}. The index was not judged; rerun ${INTEGRITY_CHECK} alone.`,
+    );
+    return { code: EXIT.EXEC_FAILED, lastHi };
   }
   log(`DONE to=${to}`);
   return { code: EXIT.DONE, lastHi };
@@ -244,9 +253,27 @@ async function healthy(deps: Deps, url: string): Promise<boolean> {
  * wrangler omits them, so callers can fail closed instead of reading a fake 0.
  */
 export function parseWranglerJson(stdout: string): ExecResult {
-  const start = stdout.search(/^\[/m);
-  if (start < 0) throw new Error(`wrangler printed no JSON array: ${stdout.trim().slice(0, 200)}`);
-  const first = (JSON.parse(stdout.slice(start)) as Record<string, unknown>[])[0] ?? {};
+  // Try every line-initial `[` against every line-final `]`, longest first, so
+  // banners (even ones starting with `[`) and trailing lines are skipped.
+  const starts = [...stdout.matchAll(/^\[/gm)].map((m) => m.index);
+  const ends = [...stdout.matchAll(/\][ \t]*$/gm)].map((m) => m.index + 1).reverse();
+  let parsed: Record<string, unknown>[] | undefined;
+  search: for (const a of starts) {
+    for (const b of ends) {
+      if (b <= a) break;
+      try {
+        const v: unknown = JSON.parse(stdout.slice(a, b));
+        if (Array.isArray(v)) {
+          parsed = v as Record<string, unknown>[];
+          break search;
+        }
+      } catch {
+        // not this pair
+      }
+    }
+  }
+  if (!parsed) throw new Error(`wrangler printed no JSON array: ${stdout.trim().slice(0, 200)}`);
+  const first = parsed[0] ?? {};
   if (first.success !== true) throw new Error(`wrangler reported success=${String(first.success)}`);
   const meta = (first.meta ?? {}) as Record<string, unknown>;
   const opt = (v: unknown) => (v === undefined || v === null ? undefined : Number(v));
