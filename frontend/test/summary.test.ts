@@ -168,6 +168,14 @@ describe('isLabelOnly', () => {
   });
 });
 
+describe('textContent markdown escapes (#84)', () => {
+  it('treats a trailing backslash as a line break and unescapes punctuation', () => {
+    expect(textContent('AMENDMENT TO\\\nSTOCK PURCHASE')).toBe('AMENDMENT TO STOCK PURCHASE');
+    expect(textContent('Price of \\$1,000 \\(net\\) and 5\\% off')).toBe('Price of $1,000 (net) and 5% off');
+    expect(textContent('a path C:\\data stays')).toBe('a path C:\\data stays');
+  });
+});
+
 describe('displayTitle', () => {
   it('keeps a real description untouched', () => {
     expect(displayTitle('Supply Agreement', '# Something else')).toBe('Supply Agreement');
@@ -195,6 +203,11 @@ describe('displayTitle', () => {
         'PROMISSORY NOTE\n\nTHIS UNSECURED PROMISSORY NOTE (THIS “ NOTE ”) HAS NOT BEEN REGISTERED',
       ),
     ).toBe('Promissory Note');
+  });
+  it('joins a heading split by a markdown hard break instead of showing the backslash (#84)', () => {
+    const md =
+      '# EXHIBIT 10.59\n\n---\n\n**Exhibit 10.59**\n\n**AMENDMENT TO\\\nSTOCK PURCHASE AGREEMENT**\n\nThis AMENDMENT (this “**Amendment**”) is made and entered into as of November 4, 2026';
+    expect(displayTitle('EXHIBIT 10.59', md)).toBe('Amendment to Stock Purchase Agreement');
   });
   it('skips the repeated exhibit label and falls back to the label when nothing fits', () => {
     expect(
