@@ -264,26 +264,11 @@ async function healthy(deps: Deps, url: string): Promise<boolean> {
  * wrangler omits them, so callers can fail closed instead of reading a fake 0.
  */
 export function parseWranglerJson(stdout: string): ExecResult {
-  // From each line-initial `[`, find its matching `]` with one string-aware scan and
-  // parse that slice. Banners (even ones starting with `[`) and trailing lines are
-  // skipped, and each candidate costs one pass (#87, #88).
-  // An unclosed candidate scans to the end of stdout, so the total scan is
-  // budgeted: past a few lengths of stdout the output is not wrangler's (#89).
   let parsed: unknown[] | undefined;
-  let budget = SCAN_BUDGET * (stdout.length + 1);
-  for (const m of stdout.matchAll(/^\[/gm)) {
-    const end = matchingBracket(stdout, m.index);
-    budget -= (end < 0 ? stdout.length : end) - m.index;
-    if (budget < 0) break;
-    if (end < 0) continue;
-    try {
-      const v: unknown = JSON.parse(stdout.slice(m.index, end + 1));
-      if (Array.isArray(v)) {
-        parsed = v;
-        break;
-      }
-    } catch {
-      // not JSON; try the next line-initial bracket
+  for (const v of jsonCandidates(stdout, '[')) {
+    if (Array.isArray(v)) {
+      parsed = v;
+      break;
     }
   }
   if (!parsed) throw new Error(`wrangler printed no JSON array: ${stdout.trim().slice(0, 200)}`);
@@ -298,6 +283,27 @@ export function parseWranglerJson(stdout: string): ExecResult {
     sizeAfter: opt(meta.size_after),
     durationMs: Number(meta.duration ?? 0),
   };
+}
+
+/**
+ * Parsed JSON values that start at a line-initial `opener` in `text`, in order.
+ * Each candidate is matched with one string-aware bracket scan, so banners (even
+ * ones starting with the opener) and trailing lines are skipped. An unclosed
+ * candidate scans to the end, so the total scan is budgeted (#87, #88, #89).
+ */
+function* jsonCandidates(text: string, opener: '[' | '{'): Generator<unknown> {
+  let budget = SCAN_BUDGET * (text.length + 1);
+  for (const m of text.matchAll(opener === '[' ? /^\[/gm : /^\{/gm)) {
+    const end = matchingBracket(text, m.index);
+    budget -= (end < 0 ? text.length : end) - m.index;
+    if (budget < 0) return;
+    if (end < 0) continue;
+    try {
+      yield JSON.parse(text.slice(m.index, end + 1)) as unknown;
+    } catch {
+      // not JSON; try the next candidate
+    }
+  }
 }
 
 /** Total scan allowed, in lengths of stdout: about four unclosed line-initial `[` lines. */
@@ -322,24 +328,19 @@ function matchingBracket(text: string, start: number): number {
 }
 
 /**
- * Map a failed `wrangler d1 execute` run to an Error. D1's structured error JSON
- * (`{"error": {"text", "notes"}}`, anywhere in stdout, with any banner or trailing
- * line) becomes a D1Error; anything else is a plain Error from stderr or the
- * process message, which can never be classified INTEGRITY (#89).
+ * Map a failed `wrangler d1 execute --json` run to an Error. wrangler prints its
+ * error object (`{"error": {"text", "notes"}}`) on stdout for every failure, D1's
+ * own and its own (auth, config, network); that object becomes a D1Error, with any
+ * banner or trailing line around it. Anything else is a plain Error from stderr or
+ * the process message. INTEGRITY needs a D1Error *and* SQLite's SQLITE_CORRUPT
+ * phrase (see runBackfill), so the tag alone never triggers delete-all advice.
  */
 export function execFailure(stdout: string | undefined, stderr: string | undefined, message: string): Error {
-  for (const m of (stdout ?? '').matchAll(/^\{/gm)) {
-    const end = matchingBracket(stdout!, m.index);
-    if (end < 0) continue;
-    try {
-      const e = (
-        JSON.parse(stdout!.slice(m.index, end + 1)) as { error?: { text?: string; notes?: { text?: string }[] } }
-      ).error;
-      const text = [e?.text, ...(e?.notes ?? []).map((n) => n.text)].filter(Boolean).join(': ');
-      if (text) return new D1Error(text);
-    } catch {
-      // not the error object; keep looking
-    }
+  for (const v of jsonCandidates(stdout ?? '', '{')) {
+    const e = (v as { error?: { text?: unknown; notes?: unknown } } | null)?.error;
+    const notes = Array.isArray(e?.notes) ? (e.notes as { text?: unknown }[]).map((n) => n?.text) : [];
+    const text = [e?.text, ...notes].filter((t): t is string => typeof t === 'string' && t !== '').join(': ');
+    if (text) return new D1Error(text);
   }
   return new Error(stderr?.trim() || message);
 }
