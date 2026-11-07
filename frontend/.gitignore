@@ -11,3 +11,4 @@ auth-*.json
 **/**/.DS_Storefrontend/
 plugins/
 _to_delete/
+dist/
