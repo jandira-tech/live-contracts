@@ -338,8 +338,9 @@ function matchingBracket(text: string, start: number): number {
  * whatever banner or trailing line surrounds it. wrangler's own failures (auth,
  * config) print text on stderr and become a plain Error, as does anything else.
  * INTEGRITY needs a D1Error *and* SQLite's SQLITE_CORRUPT phrase (see runBackfill),
- * so the tag alone never triggers delete-all advice. Only string `text`/`notes`
- * values count; a non-string `text` falls back to stderr.
+ * so the tag alone never triggers delete-all advice. Only non-empty string
+ * `text`/`notes` values count; a candidate without any is skipped, and if none
+ * qualifies the mapping falls back to stderr.
  */
 export function execFailure(stdout: string | undefined, stderr: string | undefined, message: string): Error {
   for (const v of jsonCandidates(stdout ?? '', '{')) {
