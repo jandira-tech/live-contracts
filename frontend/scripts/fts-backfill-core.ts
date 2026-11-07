@@ -306,7 +306,12 @@ function* jsonCandidates(text: string, opener: '[' | '{'): Generator<unknown> {
   }
 }
 
-/** Total scan allowed, in lengths of stdout: about four unclosed line-initial `[` lines. */
+/**
+ * Total scan allowed, in lengths of the text, shared by every candidate. An
+ * unclosed line-initial `[` or `{` scans from where it starts to the end, so a few
+ * such lines near the top fit and many give up (pinned in tests). Real wrangler
+ * output has no column-0 junk brackets, so it never reaches the limit.
+ */
 const SCAN_BUDGET = 4;
 
 /** Index of the bracket closing the one at `start` (`[` or `{`), skipping JSON strings; -1 if none. */
@@ -328,12 +333,13 @@ function matchingBracket(text: string, start: number): number {
 }
 
 /**
- * Map a failed `wrangler d1 execute --json` run to an Error. wrangler prints its
- * error object (`{"error": {"text", "notes"}}`) on stdout for every failure, D1's
- * own and its own (auth, config, network); that object becomes a D1Error, with any
- * banner or trailing line around it. Anything else is a plain Error from stderr or
- * the process message. INTEGRITY needs a D1Error *and* SQLite's SQLITE_CORRUPT
- * phrase (see runBackfill), so the tag alone never triggers delete-all advice.
+ * Map a failed `wrangler d1 execute --json` run to an Error. D1's structured error
+ * JSON on stdout (`{"error": {"text", "notes"}}`), when present, becomes a D1Error,
+ * whatever banner or trailing line surrounds it. wrangler's own failures (auth,
+ * config) print text on stderr and become a plain Error, as does anything else.
+ * INTEGRITY needs a D1Error *and* SQLite's SQLITE_CORRUPT phrase (see runBackfill),
+ * so the tag alone never triggers delete-all advice. Only string `text`/`notes`
+ * values count; a non-string `text` falls back to stderr.
  */
 export function execFailure(stdout: string | undefined, stderr: string | undefined, message: string): Error {
   for (const v of jsonCandidates(stdout ?? '', '{')) {
