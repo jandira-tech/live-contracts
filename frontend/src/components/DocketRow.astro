@@ -1,7 +1,7 @@
 ---
 import type { Ex10Summary } from '../lib/api';
 import { formatNY, formatFiledAt } from '../lib/time';
-import { displayTitle, textContent } from '../lib/summary';
+import { displayTitle, snippetHtml, textContent } from '../lib/summary';
 import { renderMarkdown } from '../lib/render-markdown';
 
 interface Props { item: Ex10Summary; }
@@ -23,10 +23,8 @@ const imageRefs = Math.max((body.match(/<!--\s*\S+\.(?:jpe?g|png|gif|tiff?)\s*--
 const pages = item.image_urls?.length || 0;
 const snippet = (item.snippet || '').trim();
 const bodyHtml = hasText && !snippet ? renderMarkdown(body) : '';
-// snippet() output is plain text plus our <mark> tags; escape everything else.
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-// Drop markdown markers from the plain-text snippet (headings, emphasis, table pipes).
-const snippetHtml = snippet ? esc(snippet.replace(/[#*_`>|\\]+/g, '').replace(/\s+/g, ' ')).replace(/&lt;mark&gt;/g, '<mark class="sl-mark">').replace(/&lt;\/mark&gt;/g, '</mark>') : '';
+// snippet() output is plain text plus our <mark> tags; see snippetHtml.
+const snippetMarkup = snippetHtml(snippet);
 
 let empty: { label: string; detail: string } | null = null;
 if (!hasText && !snippet) {
@@ -45,10 +43,10 @@ if (!hasText && !snippet) {
   </div>
 
   <div class="sl-doc-body">
-    {snippetHtml ? (
+    {snippetMarkup ? (
       <div class="sl-doc-extract">
         <div class="sl-doc-extract-inner">
-          <p class="sl-snippet" set:html={snippetHtml} />
+          <p class="sl-snippet" set:html={snippetMarkup} />
         </div>
       </div>
     ) : bodyHtml ? (

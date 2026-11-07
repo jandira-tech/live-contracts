@@ -1,21 +1,36 @@
 -- Full-text index for /search and the MCP search_agreements tool.
--- A standalone FTS5 table (not external-content: `exhibits.id` is a text key, so
--- rowids are not stable enough to point at). Triggers keep it in step with every
--- INSERT / UPDATE / DELETE the ingest route performs. Backfill of existing rows
--- is a separate, chunked step: `bun run db:fts-backfill` (scripts/fts-backfill.ts).
-CREATE VIRTUAL TABLE IF NOT EXISTS `exhibits_fts` USING fts5(
-	`id` UNINDEXED,
+-- External content: the index stores tokens and document sizes only and reads
+-- `description` / `markdown` back from `exhibits` by rowid, so the 1.8 GB of
+-- markdown is not stored twice. `exhibits.id` is a TEXT key, so the implicit
+-- rowid is the join key: never join FTS on the UUID.
+-- A migration that rebuilds `exhibits` (create/copy/drop/rename) renumbers rowids
+-- and drops these triggers: recreate them and run
+--   INSERT INTO exhibits_fts(exhibits_fts) VALUES('rebuild');
+-- Backfill rows that predate the triggers with `pnpm db:fts-backfill` or a single
+-- `rebuild`, then verify with
+--   INSERT INTO exhibits_fts(exhibits_fts, rank) VALUES('integrity-check', 1);
+-- Deliberately unguarded: a database still holding the old standalone table must fail here.
+CREATE VIRTUAL TABLE `exhibits_fts` USING fts5(
 	`description`,
 	`markdown`,
+	content = 'exhibits',
+	content_rowid = 'rowid',
 	tokenize = 'unicode61 remove_diacritics 2'
 );--> statement-breakpoint
-CREATE TRIGGER IF NOT EXISTS `exhibits_fts_ai` AFTER INSERT ON `exhibits` BEGIN
-	INSERT INTO `exhibits_fts`(`id`, `description`, `markdown`) VALUES (new.`id`, coalesce(new.`description`, ''), coalesce(new.`markdown`, ''));
+CREATE TRIGGER `exhibits_fts_ai` AFTER INSERT ON `exhibits` BEGIN
+	INSERT INTO `exhibits_fts`(`rowid`, `description`, `markdown`)
+	VALUES (new.`rowid`, coalesce(new.`description`, ''), coalesce(new.`markdown`, ''));
 END;--> statement-breakpoint
-CREATE TRIGGER IF NOT EXISTS `exhibits_fts_ad` AFTER DELETE ON `exhibits` BEGIN
-	DELETE FROM `exhibits_fts` WHERE `id` = old.`id`;
+CREATE TRIGGER `exhibits_fts_ad` AFTER DELETE ON `exhibits` BEGIN
+	INSERT INTO `exhibits_fts`(`exhibits_fts`, `rowid`, `description`, `markdown`)
+	VALUES ('delete', old.`rowid`, coalesce(old.`description`, ''), coalesce(old.`markdown`, ''));
 END;--> statement-breakpoint
-CREATE TRIGGER IF NOT EXISTS `exhibits_fts_au` AFTER UPDATE OF `description`, `markdown` ON `exhibits` BEGIN
-	DELETE FROM `exhibits_fts` WHERE `id` = old.`id`;
-	INSERT INTO `exhibits_fts`(`id`, `description`, `markdown`) VALUES (new.`id`, coalesce(new.`description`, ''), coalesce(new.`markdown`, ''));
+-- Ingest rewrites description and markdown on every conflict; the IS NOT guard
+-- (NULL-safe) skips re-tokenizing an unchanged ~94 KB body on each re-push.
+CREATE TRIGGER `exhibits_fts_au` AFTER UPDATE OF `description`, `markdown` ON `exhibits`
+WHEN new.`description` IS NOT old.`description` OR new.`markdown` IS NOT old.`markdown` BEGIN
+	INSERT INTO `exhibits_fts`(`exhibits_fts`, `rowid`, `description`, `markdown`)
+	VALUES ('delete', old.`rowid`, coalesce(old.`description`, ''), coalesce(old.`markdown`, ''));
+	INSERT INTO `exhibits_fts`(`rowid`, `description`, `markdown`)
+	VALUES (new.`rowid`, coalesce(new.`description`, ''), coalesce(new.`markdown`, ''));
 END;
