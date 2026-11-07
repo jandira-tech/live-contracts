@@ -278,6 +278,17 @@ describe('runBackfill', () => {
     expect(log).not.toMatch(/delete-all/);
   });
 
+  it('never reads INTEGRITY out of wrangler output text (#88)', async () => {
+    const f = fakeD1({
+      rows: ids(7),
+      index: [],
+      integrityError: 'wrangler printed no JSON array: warning: cache looks corrupt, refreshing',
+    });
+    const { d, lines } = deps(f.exec);
+    expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.EXEC_FAILED);
+    expect(lines.join('\n')).not.toMatch(/delete-all/);
+  });
+
   it('maps a failed read before any chunk to EXEC_FAILED, not a crash (#83)', async () => {
     const f = fakeD1(
       { rows: ids(7), index: [] },
@@ -290,6 +301,7 @@ describe('runBackfill', () => {
     const { d, lines } = deps(f.exec);
     expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.EXEC_FAILED, lastHi: 0 });
     expect(lines.join('\n')).toMatch(/EXEC_FAILED.*SQLITE_BUSY/);
+    expect(lines.join('\n')).not.toMatch(/A read against D1 failed/);
   });
 
   it('maps a failed read mid-run to EXEC_FAILED with the last indexed rowid (#83)', async () => {
@@ -333,6 +345,18 @@ describe('parseWranglerJson (#83)', () => {
   it('ignores trailing output and banner lines that start with [ (#87)', () => {
     expect(parseWranglerJson(`${row}Done in 412ms\n`).rows).toEqual([{ n: 3 }]);
     expect(parseWranglerJson(`[mf:inf] local db ready\n${row}`).rows).toEqual([{ n: 3 }]);
+  });
+
+  it('scans each candidate once, so many bracketed banner lines stay cheap (#88)', () => {
+    const banners = '[warn] something odd ]\n'.repeat(2000);
+    const t0 = performance.now();
+    expect(parseWranglerJson(`${banners}${row}`).rows).toEqual([{ n: 3 }]);
+    expect(() => parseWranglerJson(banners)).toThrow(/no JSON/);
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
+
+  it('reports an empty array as empty, not as success=undefined (#88)', () => {
+    expect(() => parseWranglerJson('[]')).toThrow(/empty/);
   });
 
   it('rejects an unsuccessful statement', () => {

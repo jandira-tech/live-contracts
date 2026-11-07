@@ -129,7 +129,9 @@ export async function runBackfill(deps: Deps, opts: Opts): Promise<{ code: numbe
     return await backfill(deps, opts, (hi) => (lastHi = hi));
   } catch (e) {
     deps.log(`EXEC_FAILED: ${(e as Error).message}`);
-    deps.log(`A read against D1 failed. Rerun with --from ${lastHi}; the resume check refuses if the index moved.`);
+    deps.log(
+      `Stopped on an error. If D1 or wrangler failed, rerun with --from ${lastHi}; the resume check refuses if the index moved. Otherwise fix the cause first.`,
+    );
     return { code: EXIT.EXEC_FAILED, lastHi };
   }
 }
@@ -219,7 +221,8 @@ async function backfill(
     const msg = (e as Error).message;
     // Only a rejection of the index is INTEGRITY. A CPU limit or a lost response
     // says nothing about the index, and delete-all would wipe a healthy one.
-    if (/malformed|corrupt/i.test(msg)) {
+    // SQLite's own SQLITE_CORRUPT text, never words found in wrangler's output (#88).
+    if (/database disk image is malformed/i.test(msg) && !/^wrangler (printed|reported)/.test(msg)) {
       log(`INTEGRITY: integrity-check failed: ${msg}. Run ${RESET} and restart from 0.`);
       return { code: EXIT.INTEGRITY, lastHi };
     }
@@ -253,27 +256,26 @@ async function healthy(deps: Deps, url: string): Promise<boolean> {
  * wrangler omits them, so callers can fail closed instead of reading a fake 0.
  */
 export function parseWranglerJson(stdout: string): ExecResult {
-  // Try every line-initial `[` against every line-final `]`, longest first, so
-  // banners (even ones starting with `[`) and trailing lines are skipped.
-  const starts = [...stdout.matchAll(/^\[/gm)].map((m) => m.index);
-  const ends = [...stdout.matchAll(/\][ \t]*$/gm)].map((m) => m.index + 1).reverse();
-  let parsed: Record<string, unknown>[] | undefined;
-  search: for (const a of starts) {
-    for (const b of ends) {
-      if (b <= a) break;
-      try {
-        const v: unknown = JSON.parse(stdout.slice(a, b));
-        if (Array.isArray(v)) {
-          parsed = v as Record<string, unknown>[];
-          break search;
-        }
-      } catch {
-        // not this pair
+  // From each line-initial `[`, find its matching `]` with one string-aware scan and
+  // parse that slice. Banners (even ones starting with `[`) and trailing lines are
+  // skipped, and each candidate costs one pass (#87, #88).
+  let parsed: unknown[] | undefined;
+  for (const m of stdout.matchAll(/^\[/gm)) {
+    const end = matchingBracket(stdout, m.index);
+    if (end < 0) continue;
+    try {
+      const v: unknown = JSON.parse(stdout.slice(m.index, end + 1));
+      if (Array.isArray(v)) {
+        parsed = v;
+        break;
       }
+    } catch {
+      // not JSON; try the next line-initial bracket
     }
   }
   if (!parsed) throw new Error(`wrangler printed no JSON array: ${stdout.trim().slice(0, 200)}`);
-  const first = parsed[0] ?? {};
+  if (parsed.length === 0) throw new Error('wrangler returned an empty result array');
+  const first = (parsed[0] ?? {}) as Record<string, unknown>;
   if (first.success !== true) throw new Error(`wrangler reported success=${String(first.success)}`);
   const meta = (first.meta ?? {}) as Record<string, unknown>;
   const opt = (v: unknown) => (v === undefined || v === null ? undefined : Number(v));
@@ -283,4 +285,20 @@ export function parseWranglerJson(stdout: string): ExecResult {
     sizeAfter: opt(meta.size_after),
     durationMs: Number(meta.duration ?? 0),
   };
+}
+
+/** Index of the `]` closing the `[` at `start`, skipping JSON strings; -1 if none. */
+function matchingBracket(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === '[') depth++;
+    else if (c === ']' && --depth === 0) return i;
+  }
+  return -1;
 }

@@ -30,7 +30,7 @@ describe('rows that predate the index (AC 1.1)', () => {
     const r = await ex10Search('leasing', 1, 20, testDb());
     expect(r.total).toBe(2);
     expect(r.items.map((i) => i.id)).toEqual(['2', '1']);
-    expect(r.items[0].snippet).toContain('\uE000leasing\uE001');
+    expect(r.items[0].snippet).toContain('\uFDD0leasing\uFDD1');
     await integrity(1);
   });
 });
@@ -140,7 +140,7 @@ describe('broad terms (AC 1.5)', () => {
     expect(p2.page_size).toBe(12);
     expect(p2.total_pages).toBe(26);
     expect(p2.items).toHaveLength(12);
-    expect(p2.items.every((i) => (i.snippet ?? '').includes('\uE000agreement\uE001'))).toBe(true);
+    expect(p2.items.every((i) => (i.snippet ?? '').includes('\uFDD0agreement\uFDD1'))).toBe(true);
     const dates = [...p1.items, ...p2.items].map((i) => i.filed_at);
     expect(dates).toEqual([...dates].sort((a = '', b = '') => b.localeCompare(a)));
     expect(new Set([...p1.items, ...p2.items].map((i) => i.id)).size).toBe(24);
