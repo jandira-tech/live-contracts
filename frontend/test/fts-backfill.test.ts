@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   D1Error,
   EXIT,
+  execFailure,
   parseArgs,
   parseWranglerJson,
   planRanges,
@@ -337,6 +338,41 @@ describe('runBackfill', () => {
     const { d, probes } = deps(f.exec);
     expect((await runBackfill(d, { mode: 'local', db: 'sec-ex10', from: 0, chunk: 3 })).code).toBe(EXIT.DONE);
     expect(probes).toEqual([]);
+  });
+});
+
+describe('execFailure: mapping a failed wrangler run (#89 follow-up)', () => {
+  const d1Json =
+    '{\n  "error": {\n    "text": "D1_ERROR: database disk image is malformed: SQLITE_CORRUPT",\n    "notes": [{ "text": "[code: 7500]" }]\n  }\n}';
+
+  it('raises D1Error for D1 structured error JSON, even with banners and trailing lines', () => {
+    const e = execFailure(
+      `🌀 Executing on remote database\n${d1Json}\n✘ [ERROR] done\n`,
+      'stderr noise',
+      'Command failed',
+    );
+    expect(e).toBeInstanceOf(D1Error);
+    expect(e.message).toBe('D1_ERROR: database disk image is malformed: SQLITE_CORRUPT: [code: 7500]');
+  });
+
+  it('falls back to a plain Error from stderr, then the process message', () => {
+    const a = execFailure('no json here', 'database disk image is malformed (from a proxy)', 'Command failed');
+    expect(a).not.toBeInstanceOf(D1Error);
+    expect(a.message).toMatch(/proxy/);
+    expect(execFailure(undefined, '  ', 'Command failed').message).toBe('Command failed');
+  });
+
+  it('feeds INTEGRITY end to end only for the D1 path', async () => {
+    const run = async (err: Error) => {
+      const f = fakeD1({ rows: ids(7), index: [], integrityError: 'unused' });
+      const exec: Deps['exec'] = async (sql) => {
+        if (sql.includes("'integrity-check'")) throw err;
+        return f.exec(sql);
+      };
+      return (await runBackfill(deps(exec).d, { ...BASE, to: 7 })).code;
+    };
+    expect(await run(execFailure(d1Json, '', 'x'))).toBe(EXIT.INTEGRITY);
+    expect(await run(execFailure('', 'database disk image is malformed', 'x'))).toBe(EXIT.EXEC_FAILED);
   });
 });
 

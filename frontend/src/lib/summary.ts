@@ -300,12 +300,6 @@ function balanceMarks(text: string): string {
   return out.endsWith('…') ? `${out.slice(0, -1).trimEnd()}${CLOSE}…` : `${out.trimEnd()}${CLOSE}`;
 }
 
-/**
- * Render an FTS5 snippet (plain markdown text with SNIPPET_OPEN/CLOSE around hits) as safe HTML for a card.
- * The tags are swapped for private-use sentinels first, so stripping markdown markers
- * cannot eat their angle brackets; everything else is escaped. `>` counts as a marker
- * only where it opens a token (blockquote), so a literal `a<b>` survives escaped.
- */
 /** Remove `<!-- … -->` in one pass; an unterminated one cuts the text with "…" (#88, #89). */
 function stripComments(t: string): string {
   let out = '';
@@ -319,6 +313,13 @@ function stripComments(t: string): string {
     i = close + 3;
   }
 }
+
+/**
+ * Render an FTS5 snippet (plain markdown text with SNIPPET_OPEN/CLOSE around hits) as safe HTML for a card.
+ * The tags are swapped for private-use sentinels first, so stripping markdown markers
+ * cannot eat their angle brackets; everything else is escaped. `>` counts as a marker
+ * only where it opens a token (blockquote), so a literal `a<b>` survives escaped.
+ */
 
 export function snippetHtml(snippet: string | null | undefined): string {
   const tidy = (t: string) =>
