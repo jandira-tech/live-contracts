@@ -155,7 +155,19 @@ describe('rowToSummary: excerpt vs excerpt_md', () => {
 // Card headline: 94 of 100 live rows carry a label-only SEC description
 // ("EX-10.1", "EXHIBIT 10.1"); the real title lives in the markdown.
 // ---------------------------------------------------------------------------
-import { displayTitle, isLabelOnly, textContent, resolveEdgarImages, ftsQuery, snippetHtml } from '../src/lib/summary';
+import {
+  displayTitle,
+  isLabelOnly,
+  textContent,
+  resolveEdgarImages,
+  ftsQuery,
+  snippetHtml,
+  SNIPPET_OPEN,
+  SNIPPET_CLOSE,
+} from '../src/lib/summary';
+
+/** What FTS5 emits now: hits wrapped in the private-use delimiters, not <mark> (#86). */
+const fts = (s: string) => s.replace(/<mark>/g, SNIPPET_OPEN).replace(/<\/mark>/g, SNIPPET_CLOSE);
 
 describe('isLabelOnly', () => {
   it('recognises SEC exhibit labels in every spelling', () => {
@@ -282,53 +294,69 @@ describe('ftsQuery', () => {
   });
 });
 
+describe('filing text cannot inject marks; stray quotes split tokens (#86)', () => {
+  it('escapes a literal <mark> that came from the filing, not from FTS5', () => {
+    // FTS5 wraps hits in <mark>…</mark>; the filing itself said "<mark>" too.
+    expect(snippetHtml(`a literal <mark> from the filing and ${SNIPPET_OPEN}hit${SNIPPET_CLOSE}`)).toBe(
+      'a literal &lt;mark&gt; from the filing and <mark class="sl-mark">hit</mark>',
+    );
+  });
+  it('treats a stray quote as a token boundary instead of fusing words', () => {
+    expect(ftsQuery('foo"bar baz"')).toBe('"foo" "bar baz"');
+    expect(ftsQuery('O"Neil')).toBe('"O" "Neil"');
+    expect(ftsQuery('"credit agreement" lender')).toBe('"credit agreement" "lender"');
+  });
+});
+
 describe('snippetHtml drops HTML comments and zero-width characters (#85)', () => {
   it('removes whole comments, including ones that contain a hit', () => {
     expect(
       snippetHtml(
-        '<!-- Document created using Wdesk --> <!-- Copyright 2026 Workiva --> Exhibit 10.1 Credit <mark>Agreement</mark>',
+        fts(
+          '<!-- Document created using Wdesk --> <!-- Copyright 2026 Workiva --> Exhibit 10.1 Credit <mark>Agreement</mark>',
+        ),
       ),
     ).toBe('Exhibit 10.1 Credit <mark class="sl-mark">Agreement</mark>');
-    expect(snippetHtml('<!-- <mark>Document</mark> created --> The <mark>Document</mark>')).toBe(
+    expect(snippetHtml(fts('<!-- <mark>Document</mark> created --> The <mark>Document</mark>'))).toBe(
       'The <mark class="sl-mark">Document</mark>',
     );
   });
   it('removes a comment cut in half by the snippet window', () => {
-    expect(snippetHtml('…11/6/2026 09:56:08 PM (UTC)--> SECOND AMENDMENT to <mark>agreement</mark>')).toBe(
+    expect(snippetHtml(fts('…11/6/2026 09:56:08 PM (UTC)--> SECOND AMENDMENT to <mark>agreement</mark>'))).toBe(
       '…SECOND AMENDMENT to <mark class="sl-mark">agreement</mark>',
     );
-    expect(snippetHtml('the <mark>agreement</mark> ends <!-- Workiva page footer…')).toBe(
+    expect(snippetHtml(fts('the <mark>agreement</mark> ends <!-- Workiva page footer…'))).toBe(
       'the <mark class="sl-mark">agreement</mark> ends…',
     );
   });
   it('keeps marks balanced when a cut comment swallows a closing tag', () => {
-    expect(snippetHtml('<mark>Docu <!-- x</mark> y')).toBe('<mark class="sl-mark">Docu</mark>…');
+    expect(snippetHtml(fts('<mark>Docu <!-- x</mark> y'))).toBe('<mark class="sl-mark">Docu</mark>…');
   });
   it('drops zero-width characters', () => {
-    expect(snippetHtml('​SECOND‍ AMEND﻿MENT')).toBe('SECOND AMENDMENT');
+    expect(snippetHtml(fts('​SECOND‍ AMEND﻿MENT'))).toBe('SECOND AMENDMENT');
   });
   it('leaves a stray "-->" in prose alone unless the snippet starts mid-comment', () => {
-    expect(snippetHtml('a <!-- b --> c --> d')).toBe('a c --&gt; d');
+    expect(snippetHtml(fts('a <!-- b --> c --> d'))).toBe('a c --&gt; d');
   });
 });
 
 describe('snippetHtml', () => {
   it('keeps the FTS <mark> tags while stripping markdown markers, including ">"', () => {
-    expect(snippetHtml('> **PLACEMENT** <mark>AGREEMENT</mark> | 5')).toBe(
+    expect(snippetHtml(fts('> **PLACEMENT** <mark>AGREEMENT</mark> | 5'))).toBe(
       'PLACEMENT <mark class="sl-mark">AGREEMENT</mark> 5',
     );
   });
   it('escapes any other markup in the source text', () => {
-    expect(snippetHtml('a <b>x</b> & <mark>y</mark>')).toBe(
+    expect(snippetHtml(fts('a <b>x</b> & <mark>y</mark>'))).toBe(
       'a &lt;b&gt;x&lt;/b&gt; &amp; <mark class="sl-mark">y</mark>',
     );
   });
   it('drops markdown table rules and horizontal rules', () => {
-    expect(snippetHtml('herein. - ----- | :---: | ------- 4.10. Under <mark>agreement</mark>')).toBe(
+    expect(snippetHtml(fts('herein. - ----- | :---: | ------- 4.10. Under <mark>agreement</mark>'))).toBe(
       'herein. 4.10. Under <mark class="sl-mark">agreement</mark>',
     );
   });
   it('is empty for an empty snippet', () => {
-    expect(snippetHtml('  ')).toBe('');
+    expect(snippetHtml(fts('  '))).toBe('');
   });
 });
