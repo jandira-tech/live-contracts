@@ -278,8 +278,32 @@ const CLOSE = '\uE001';
  * cannot eat their angle brackets; everything else is escaped. `>` counts as a marker
  * only where it opens a token (blockquote), so a literal `a<b>` survives escaped.
  */
+/** Drop a close sentinel with no open one and close one left open, before the end ellipsis. */
+function balanceMarks(text: string): string {
+  let open = false;
+  let out = '';
+  for (const ch of text) {
+    if (ch === OPEN) {
+      if (open) continue;
+      open = true;
+    } else if (ch === CLOSE) {
+      if (!open) continue;
+      open = false;
+    }
+    out += ch;
+  }
+  if (!open) return out;
+  return out.endsWith('…') ? `${out.slice(0, -1).trimEnd()}${CLOSE}…` : `${out.trimEnd()}${CLOSE}`;
+}
+
 export function snippetHtml(snippet: string | null | undefined): string {
   const plain = (snippet ?? '')
+    // HTML comments (Workiva/Wdesk banners) are not text. A snippet that starts
+    // with "…" can begin inside one, and any snippet can end inside one.
+    .replace(/^…(?:(?!<!--)[\s\S])*?-->\s*/, '…')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/\s*<!--[\s\S]*$/, '…')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .replace(/<mark>/g, OPEN)
     .replace(/<\/mark>/g, CLOSE)
     .replace(/[#*_`|\\]+/g, '')
@@ -288,7 +312,7 @@ export function snippetHtml(snippet: string | null | undefined): string {
     .replace(/(^|\s)-(?=\s|$)/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
-  return plain
+  return balanceMarks(plain)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
