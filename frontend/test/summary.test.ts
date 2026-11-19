@@ -317,6 +317,10 @@ describe('confirmation review (#89)', () => {
   it('keeps a stray --> that follows a real comment at the start', () => {
     expect(snippetHtml(fts('… <!-- c --> y --> <mark>z</mark>'))).toBe('… y --&gt; <mark class="sl-mark">z</mark>');
   });
+  it('strips a whole downlevel fragment instead of leaking its opener when the snippet leads with an ellipsis', () => {
+    expect(snippetHtml('…<![endif]--> credit agreement')).toBe('… credit agreement');
+    expect(snippetHtml('…<![if !IE]>x<![endif]--> agreement')).toBe('… x agreement');
+  });
   it('drops square brackets inside tokens like parentheses', () => {
     expect(ftsQuery('[ credit agreement ]')).toBe('"credit" "agreement"');
     expect(ftsQuery('[credit]')).toBe('"credit"');

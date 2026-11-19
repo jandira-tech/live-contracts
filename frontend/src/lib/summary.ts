@@ -333,7 +333,10 @@ export function snippetHtml(snippet: string | null | undefined): string {
   // A snippet starting with "…" can start inside a comment: drop only its closing
   // marker, so a stray "-->" in prose never costs the words before it (#87).
   const lead = t.startsWith('…') ? t.indexOf('-->') : -1;
-  if (lead >= 0 && !t.slice(0, lead).includes('<!--')) t = `${t.slice(0, lead)} ${t.slice(lead + 3)}`;
+  // A `-->` that closes a Word downlevel fragment (`<![endif]-->`) is not a comment
+  // closer; leave it for the fragment strip below so the opener cannot leak through.
+  if (lead >= 0 && !t.slice(0, lead).includes('<!--') && !/<!\[[^\]]*\]$/.test(t.slice(0, lead)))
+    t = `${t.slice(0, lead)} ${t.slice(lead + 3)}`;
   t = stripComments(t).replace(/<!\[(?:if[^\]]*|endif)\](?:--)?>/gi, ' ');
   t = t
     .replace(/[#*_`|\\]+/g, '')
