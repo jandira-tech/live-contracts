@@ -52,9 +52,18 @@ async function main(): Promise<number> {
   }
   const deps: Deps = {
     exec: wranglerExec(opts),
-    probe: async (url) =>
-      (await fetch(url, { headers: { 'user-agent': 'fts-backfill' }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) }))
-        .status,
+    probe: async (url) => {
+      const t0 = performance.now();
+      try {
+        const res = await fetch(url, {
+          headers: { 'user-agent': 'fts-backfill' },
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        return { status: res.status, ms: Math.round(performance.now() - t0) };
+      } catch {
+        return { status: 0, ms: Math.round(performance.now() - t0) };
+      }
+    },
     log: (line) => console.log(line),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   };

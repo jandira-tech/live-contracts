@@ -62,8 +62,16 @@ describe('parseArgs (AC 2.2)', () => {
     [['--local', '--origin', 'https://live-contracts.arthur.law']],
     [['--remote', '--to', '9', '--from', '1', '--from', '2']],
     [['--remote', '--remote', '--to', '9']],
+    [['--remote', '--to', '9', '--origin']],
+    [['--remote', '--to', '9', '--db']],
+    [['--remote', '--to', '9', '--persist-to']],
+    [['--local', '--persist-to']],
   ])('rejects %j', (argv) => {
     expect(() => parseArgs(argv)).toThrow(/usage/i);
+  });
+  it('rejects a value-taking flag at the end of the arguments instead of ignoring it', () => {
+    expect(() => parseArgs(['--remote', '--to', '9', '--origin'])).toThrow(/--origin requires a value/);
+    expect(() => parseArgs(['--local', '--persist-to'])).toThrow(/--persist-to requires a value/);
   });
 });
 
@@ -117,7 +125,7 @@ function fakeD1(
   };
   return { exec, writes, integrityChecks: () => integrityChecks };
 }
-const deps = (exec: Deps['exec'], probe: Deps['probe'] = async () => 200) => {
+const deps = (exec: Deps['exec'], probe: Deps['probe'] = async () => ({ status: 200, ms: 1 })) => {
   const lines: string[] = [];
   const probes: string[] = [];
   const d: Deps = {
@@ -201,7 +209,7 @@ describe('runBackfill', () => {
 
   it('stops after three retries of an unhealthy probe (AC 2.4)', async () => {
     const f = fakeD1({ rows: ids(7), index: [] });
-    const { d, probes } = deps(f.exec, async () => 500);
+    const { d, probes } = deps(f.exec, async () => ({ status: 500, ms: 1 }));
     const sleeps: number[] = [];
     d.sleep = async (ms) => {
       sleeps.push(ms);
@@ -215,8 +223,24 @@ describe('runBackfill', () => {
   it('recovers from a transient probe failure', async () => {
     const f = fakeD1({ rows: ids(7), index: [] });
     let calls = 0;
-    const { d } = deps(f.exec, async () => (++calls === 1 ? 503 : 200));
+    const { d } = deps(f.exec, async () => ({ status: ++calls === 1 ? 503 : 200, ms: 1 }));
     expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.DONE);
+  });
+
+  it('stops when a 200 probe answers too slowly (AC 3.5: under 2 s)', async () => {
+    const f = fakeD1({ rows: ids(7), index: [] });
+    const { d, lines, probes } = deps(f.exec, async () => ({ status: 200, ms: 2_500 }));
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.UNHEALTHY, lastHi: 3 });
+    expect(probes).toHaveLength(4);
+    expect(lines.join('\n')).toMatch(/probe .* -> 200 in 2500 ms/);
+    expect(f.writes).toHaveLength(1);
+  });
+
+  it('accepts a 200 probe inside the 2 s budget and logs its latency', async () => {
+    const f = fakeD1({ rows: ids(7), index: [] });
+    const { d, lines } = deps(f.exec, async () => ({ status: 200, ms: 640 }));
+    expect((await runBackfill(d, { ...BASE, to: 7 })).code).toBe(EXIT.DONE);
+    expect(lines.join('\n')).toMatch(/-> 200 in 640 ms/);
   });
 
   it('reports a failed chunk with its range and both possible outcomes (#83)', async () => {

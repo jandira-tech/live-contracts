@@ -38,9 +38,15 @@ export interface ExecResult {
   durationMs: number;
 }
 
+/** One health probe: HTTP status and how long the answer took (AC 3.5). */
+export interface ProbeResult {
+  status: number;
+  ms: number;
+}
+
 export interface Deps {
   exec(sql: string): Promise<ExecResult>;
-  probe(url: string): Promise<number>;
+  probe(url: string): Promise<ProbeResult>;
   log(line: string): void;
   sleep(ms: number): Promise<void>;
 }
@@ -68,6 +74,8 @@ export const EXIT = {
 
 const SIZE_CAP_BYTES = 8_000_000_000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000];
+/** AC 3.5: public health must stay under 2 s while the backfill runs. */
+const PROBE_BUDGET_MS = 2_000;
 const DEFAULT_ORIGIN = 'https://live-contracts.arthur.law';
 const RESET = "INSERT INTO exhibits_fts(exhibits_fts) VALUES('delete-all')";
 const INTEGRITY_CHECK = "INSERT INTO exhibits_fts(exhibits_fts, rank) VALUES('integrity-check', 1)";
@@ -92,7 +100,11 @@ export function parseArgs(argv: string[]): Opts {
   const seen = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    const val = () => argv[++i];
+    const val = () => {
+      const v = argv[++i];
+      if (v === undefined) throw usage(`${a} requires a value`);
+      return v;
+    };
     if (a !== '--remote' && a !== '--local') {
       if (seen.has(a)) throw usage(`${a} given twice`);
       seen.add(a);
@@ -245,13 +257,14 @@ async function backfill(
 
 async function healthy(deps: Deps, url: string): Promise<boolean> {
   for (let attempt = 0; ; attempt++) {
-    let status = 0;
+    let p: ProbeResult = { status: 0, ms: 0 };
     try {
-      status = await deps.probe(url);
+      p = await deps.probe(url);
     } catch {
-      status = 0;
+      p = { status: 0, ms: 0 };
     }
-    if (status === 200) return true;
+    deps.log(`probe ${url} -> ${p.status} in ${p.ms} ms`);
+    if (p.status === 200 && p.ms <= PROBE_BUDGET_MS) return true;
     if (attempt >= RETRY_DELAYS_MS.length) return false;
     await deps.sleep(RETRY_DELAYS_MS[attempt]);
   }
