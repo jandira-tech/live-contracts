@@ -18,7 +18,7 @@
     "lint": "oxlint",
     "db:generate": "drizzle-kit generate",
     "db:setup": "bun run scripts/seed-local-d1.ts",
-    "db:fts-backfill": "bun run scripts/fts-backfill.ts",
+    "db:fts-backfill": "node scripts/fts-backfill.ts",
     "db:migrate": "wrangler d1 migrations apply sec-ex10 --remote"
   },
   "dependencies": {
@@ -38,6 +38,7 @@
     "@astrojs/compiler-rs": "^0.5.2",
     "@cloudflare/vitest-pool-workers": "^0.17.0",
     "@cloudflare/workers-types": "^4.20241127.0",
+    "@types/node": "^26.6.6",
     "drizzle-kit": "^0.31.10",
     "oxfmt": "^0.76.0",
     "oxlint": "^1.91.0",

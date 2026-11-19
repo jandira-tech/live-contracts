@@ -1,0 +1,11 @@
+{
+  // Operator scripts run under Node (node scripts/fts-backfill.ts), not workerd.
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  // seed-local-d1.ts still targets Bun (follow-up in contracts_fix.md §7).
+  "include": ["./fts-backfill*.ts"]
+}
