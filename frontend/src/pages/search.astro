@@ -15,6 +15,11 @@ const lastPage = result ? Math.max(1, result.total_pages ?? 0) : 1;
 const prev = result && page > 1 ? page - 1 : null;
 const next = result && page < lastPage ? page + 1 : null;
 const qs = (p: number) => `/search?q=${encodeURIComponent(q)}&page=${p}`;
+// A page past the end (an old link, an edited URL) goes to the last page rather
+// than rendering "N results" above "No matches".
+if (result && result.items.length === 0 && (result.total ?? 0) > 0 && page > lastPage) {
+  return Astro.redirect(qs(lastPage), 302);
+}
 
 Astro.response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
 ---

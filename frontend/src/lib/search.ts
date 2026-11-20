@@ -13,7 +13,7 @@
 import { count, desc, sql } from 'drizzle-orm';
 import { exhibits } from '../db/schema';
 import { getDb, type DB } from '../db/client';
-import { rowToSummary, ftsQuery } from './summary';
+import { rowToSummary, ftsQuery, SNIPPET_OPEN, SNIPPET_CLOSE } from './summary';
 import { summaryCols, pages } from './columns';
 import type { PageResult } from './api';
 
@@ -22,7 +22,7 @@ export interface SearchResult extends PageResult {
   engine: 'fts';
 }
 
-const SNIPPET = sql<string>`snippet(exhibits_fts, 1, '<mark>', '</mark>', '…', 28)`;
+const SNIPPET = sql<string>`snippet(exhibits_fts, -1, ${SNIPPET_OPEN}, ${SNIPPET_CLOSE}, '…', 28)`;
 // Ties on filed_at are common (one filing carries several EX-10s); the rowid
 // tie-break keeps page boundaries stable. idx_ex_filed_at already ends in rowid.
 const BY_NEWEST = sql`filed_at DESC, rowid DESC`;

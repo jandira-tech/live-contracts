@@ -15,6 +15,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import {
   EXIT,
+  execFailure,
   parseArgs,
   parseWranglerJson,
   runBackfill,
@@ -35,21 +36,10 @@ function wranglerExec(opts: Opts) {
       ({ stdout } = await run('pnpm', args, { maxBuffer: 64 * 1024 * 1024 }));
     } catch (e) {
       const err = e as { stdout?: string; stderr?: string; message: string };
-      throw new Error(lastJsonError(err.stdout) ?? err.stderr?.trim() ?? err.message);
+      throw execFailure(err.stdout, err.stderr, err.message);
     }
     return parseWranglerJson(stdout);
   };
-}
-
-function lastJsonError(stdout?: string): string | undefined {
-  const i = stdout?.search(/^\{/m) ?? -1;
-  if (!stdout || i < 0) return undefined;
-  try {
-    const e = JSON.parse(stdout.slice(i)).error;
-    return [e?.text, ...(e?.notes ?? []).map((n: { text: string }) => n.text)].filter(Boolean).join(': ');
-  } catch {
-    return undefined;
-  }
 }
 
 async function main(): Promise<number> {
@@ -62,9 +52,18 @@ async function main(): Promise<number> {
   }
   const deps: Deps = {
     exec: wranglerExec(opts),
-    probe: async (url) =>
-      (await fetch(url, { headers: { 'user-agent': 'fts-backfill' }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) }))
-        .status,
+    probe: async (url) => {
+      const t0 = performance.now();
+      try {
+        const res = await fetch(url, {
+          headers: { 'user-agent': 'fts-backfill' },
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        return { status: res.status, ms: Math.round(performance.now() - t0) };
+      } catch {
+        return { status: 0, ms: Math.round(performance.now() - t0) };
+      }
+    },
     log: (line) => console.log(line),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   };

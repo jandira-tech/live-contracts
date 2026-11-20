@@ -38,11 +38,25 @@ export interface ExecResult {
   durationMs: number;
 }
 
+/** One health probe: HTTP status and how long the answer took (AC 3.5). */
+export interface ProbeResult {
+  status: number;
+  ms: number;
+}
+
 export interface Deps {
   exec(sql: string): Promise<ExecResult>;
-  probe(url: string): Promise<number>;
+  probe(url: string): Promise<ProbeResult>;
   log(line: string): void;
   sleep(ms: number): Promise<void>;
+}
+
+/**
+ * An error D1 itself reported (wrangler's structured error JSON). Only these can
+ * prove the index corrupt; stderr or parser text never can (#89).
+ */
+export class D1Error extends Error {
+  override name = 'D1Error';
 }
 
 export const EXIT = {
@@ -60,6 +74,8 @@ export const EXIT = {
 
 const SIZE_CAP_BYTES = 8_000_000_000;
 const RETRY_DELAYS_MS = [1000, 2000, 4000];
+/** AC 3.5: public health must stay under 2 s while the backfill runs. */
+const PROBE_BUDGET_MS = 2_000;
 const DEFAULT_ORIGIN = 'https://live-contracts.arthur.law';
 const RESET = "INSERT INTO exhibits_fts(exhibits_fts) VALUES('delete-all')";
 const INTEGRITY_CHECK = "INSERT INTO exhibits_fts(exhibits_fts, rank) VALUES('integrity-check', 1)";
@@ -84,14 +100,18 @@ export function parseArgs(argv: string[]): Opts {
   const seen = new Set<string>();
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    const val = () => argv[++i];
+    const val = () => {
+      const v = argv[++i];
+      if (v === undefined) throw usage(`${a} requires a value`);
+      return v;
+    };
     if (a !== '--remote' && a !== '--local') {
       if (seen.has(a)) throw usage(`${a} given twice`);
       seen.add(a);
     }
     if (a === '--remote' || a === '--local') {
       const m = a === '--remote' ? 'remote' : 'local';
-      if (mode && mode !== m) throw usage('choose one of --remote or --local');
+      if (mode) throw usage(mode === m ? `${a} given twice` : 'choose one of --remote or --local');
       mode = m;
     } else if (a === '--to') o.to = int('--to', val(), 0, Number.MAX_SAFE_INTEGER);
     else if (a === '--from') o.from = int('--from', val(), 0, Number.MAX_SAFE_INTEGER);
@@ -107,6 +127,9 @@ export function parseArgs(argv: string[]): Opts {
     throw usage('--remote needs --to <max rowid> taken after the producer stopped');
   if (o.to !== undefined && o.from! > o.to) throw usage('--from must not exceed --to');
   if (!o.db) throw usage('--db needs a name');
+  // An explicitly passed empty/non-HTTP origin would be falsy and silently skip
+  // every health probe while the run still returns DONE; reject it up front.
+  if (origin !== undefined && !/^https?:\/\/\S+$/i.test(origin)) throw usage('--origin must be an http(s) URL');
   return { ...(o as Opts), to: o.to, mode, origin: mode === 'remote' ? (origin ?? DEFAULT_ORIGIN) : undefined };
 }
 
@@ -129,7 +152,9 @@ export async function runBackfill(deps: Deps, opts: Opts): Promise<{ code: numbe
     return await backfill(deps, opts, (hi) => (lastHi = hi));
   } catch (e) {
     deps.log(`EXEC_FAILED: ${(e as Error).message}`);
-    deps.log(`A read against D1 failed. Rerun with --from ${lastHi}; the resume check refuses if the index moved.`);
+    deps.log(
+      `Stopped on an error. If D1 or wrangler failed, rerun with --from ${lastHi}; the resume check refuses if the index moved. Otherwise fix the cause first.`,
+    );
     return { code: EXIT.EXEC_FAILED, lastHi };
   }
 }
@@ -216,8 +241,19 @@ async function backfill(
   try {
     await deps.exec(INTEGRITY_CHECK);
   } catch (e) {
-    log(`INTEGRITY: integrity-check failed: ${(e as Error).message}. Run ${RESET} and restart from 0.`);
-    return { code: EXIT.INTEGRITY, lastHi };
+    const msg = (e as Error).message;
+    // Only a rejection of the index is INTEGRITY. A CPU limit or a lost response
+    // says nothing about the index, and delete-all would wipe a healthy one.
+    // SQLite's own corruption text in D1's structured error, including the
+    // SQLITE_CORRUPT_VTAB code FTS5's integrity-check reports (#88, #89).
+    if (e instanceof D1Error && /database disk image is malformed|SQLITE_CORRUPT/i.test(msg)) {
+      log(`INTEGRITY: integrity-check failed: ${msg}. Run ${RESET} and restart from 0.`);
+      return { code: EXIT.INTEGRITY, lastHi };
+    }
+    log(
+      `EXEC_FAILED: integrity-check did not finish: ${msg}. The index was not judged; rerun ${INTEGRITY_CHECK} alone.`,
+    );
+    return { code: EXIT.EXEC_FAILED, lastHi };
   }
   log(`DONE to=${to}`);
   return { code: EXIT.DONE, lastHi };
@@ -225,13 +261,14 @@ async function backfill(
 
 async function healthy(deps: Deps, url: string): Promise<boolean> {
   for (let attempt = 0; ; attempt++) {
-    let status = 0;
+    let p: ProbeResult = { status: 0, ms: 0 };
     try {
-      status = await deps.probe(url);
+      p = await deps.probe(url);
     } catch {
-      status = 0;
+      p = { status: 0, ms: 0 };
     }
-    if (status === 200) return true;
+    deps.log(`probe ${url} -> ${p.status} in ${p.ms} ms`);
+    if (p.status === 200 && p.ms <= PROBE_BUDGET_MS) return true;
     if (attempt >= RETRY_DELAYS_MS.length) return false;
     await deps.sleep(RETRY_DELAYS_MS[attempt]);
   }
@@ -244,9 +281,16 @@ async function healthy(deps: Deps, url: string): Promise<boolean> {
  * wrangler omits them, so callers can fail closed instead of reading a fake 0.
  */
 export function parseWranglerJson(stdout: string): ExecResult {
-  const start = stdout.search(/^\[/m);
-  if (start < 0) throw new Error(`wrangler printed no JSON array: ${stdout.trim().slice(0, 200)}`);
-  const first = (JSON.parse(stdout.slice(start)) as Record<string, unknown>[])[0] ?? {};
+  let parsed: unknown[] | undefined;
+  for (const v of jsonCandidates(stdout, '[')) {
+    if (Array.isArray(v)) {
+      parsed = v;
+      break;
+    }
+  }
+  if (!parsed) throw new Error(`wrangler printed no JSON array: ${stdout.trim().slice(0, 200)}`);
+  if (parsed.length === 0) throw new Error('wrangler returned an empty result array');
+  const first = (parsed[0] ?? {}) as Record<string, unknown>;
   if (first.success !== true) throw new Error(`wrangler reported success=${String(first.success)}`);
   const meta = (first.meta ?? {}) as Record<string, unknown>;
   const opt = (v: unknown) => (v === undefined || v === null ? undefined : Number(v));
@@ -256,4 +300,72 @@ export function parseWranglerJson(stdout: string): ExecResult {
     sizeAfter: opt(meta.size_after),
     durationMs: Number(meta.duration ?? 0),
   };
+}
+
+/**
+ * Parsed JSON values that start at a line-initial `opener` in `text`, in order.
+ * Each candidate is matched with one string-aware bracket scan, so banners (even
+ * ones starting with the opener) and trailing lines are skipped. An unclosed
+ * candidate scans to the end, so the total scan is budgeted (#87, #88, #89).
+ */
+function* jsonCandidates(text: string, opener: '[' | '{'): Generator<unknown> {
+  let budget = SCAN_BUDGET * (text.length + 1);
+  for (const m of text.matchAll(opener === '[' ? /^\[/gm : /^\{/gm)) {
+    const end = matchingBracket(text, m.index);
+    budget -= (end < 0 ? text.length : end) - m.index;
+    if (budget < 0) return;
+    if (end < 0) continue;
+    try {
+      yield JSON.parse(text.slice(m.index, end + 1)) as unknown;
+    } catch {
+      // not JSON; try the next candidate
+    }
+  }
+}
+
+/**
+ * Total scan allowed, in lengths of the text, shared by every candidate. An
+ * unclosed line-initial `[` or `{` scans from where it starts to the end, so a few
+ * such lines near the top fit and many give up (pinned in tests). Real wrangler
+ * output has no column-0 junk brackets, so it never reaches the limit.
+ */
+const SCAN_BUDGET = 4;
+
+/** Index of the bracket closing the one at `start` (`[` or `{`), skipping JSON strings; -1 if none. */
+function matchingBracket(text: string, start: number): number {
+  const open = text[start];
+  const close = open === '{' ? '}' : ']';
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === '\\') i++;
+      else if (c === '"') inString = false;
+    } else if (c === '"') inString = true;
+    else if (c === open) depth++;
+    else if (c === close && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * Map a failed `wrangler d1 execute --json` run to an Error. D1's structured error
+ * JSON on stdout (`{"error": {"text", "notes"}}`), when present, becomes a D1Error,
+ * whatever banner or trailing line surrounds it. wrangler's own failures (auth,
+ * config) print text on stderr and become a plain Error, as does anything else.
+ * INTEGRITY needs a D1Error *and* SQLite's SQLITE_CORRUPT phrase (see runBackfill),
+ * so the tag alone never triggers delete-all advice. Only non-empty string
+ * `text`/`notes` values count; a candidate without any is skipped, and if none
+ * qualifies the mapping falls back to trimmed stderr, or to the caller's `message`
+ * when that is blank.
+ */
+export function execFailure(stdout: string | undefined, stderr: string | undefined, message: string): Error {
+  for (const v of jsonCandidates(stdout ?? '', '{')) {
+    const e = (v as { error?: { text?: unknown; notes?: unknown } } | null)?.error;
+    const notes = Array.isArray(e?.notes) ? (e.notes as { text?: unknown }[]).map((n) => n?.text) : [];
+    const text = [e?.text, ...notes].filter((t): t is string => typeof t === 'string' && t !== '').join(': ');
+    if (text) return new D1Error(text);
+  }
+  return new Error(stderr?.trim() || message);
 }

@@ -46,7 +46,7 @@ export interface Ex10Summary {
   items?: string[];
   filed_at?: string; // SEC acceptance datetime "YYYYMMDDHHMMSS" (ET); "" until backfilled
   image_urls?: string[]; // HF-dataset URLs for scanned (image-only) exhibits; [] otherwise
-  snippet?: string; // search hit context from FTS5 snippet(); <mark> wraps the matched terms
+  snippet?: string; // search hit context from FTS5 snippet(); SNIPPET_OPEN/CLOSE (U+FDD0/U+FDD1) wrap the hits, render with snippetHtml
 }
 
 export interface Ex10Detail extends Ex10Summary {

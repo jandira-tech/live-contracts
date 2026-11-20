@@ -2,7 +2,7 @@
 # Read-only smoke test for Live Contracts.
 # Usage: H=https://live-contracts.arthur.law ./smoke-prod.sh
 # It only reads; the ingest check sends no key and expects a rejection.
-# Needs: bash, curl, jq, GNU date. Exit status 1 when any check fails.
+# Needs: bash, curl, jq, GNU date (gdate on macOS). Exit status 1 when any check fails.
 H=${H:-https://live-contracts.arthur.law}; fail=0
 t(){ if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (want '$2', got '$3')"; fail=1; fi; }
 rpc(){ curl -s -m 30 -X POST "$H/mcp" -H 'content-type: application/json' \
@@ -13,6 +13,23 @@ case "$title" in *"EX-10"*|*"Live Contracts"*) echo "ok   home title";; *) echo 
 t "robots.txt is ours"   1   "$(curl -s -m 20 "$H/robots.txt" | grep -c 'live-contracts.arthur.law/sitemap.xml')"
 t "sitemap"              200 "$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$H/sitemap.xml")"
 t "search page"          200 "$(curl -s -o /dev/null -w '%{http_code}' -m 30 "$H/search")"
+# Full-text search on all three surfaces (FTS5, migration 0003).
+hits=$(curl -s -m 30 -A 'Mozilla/5.0 (smoke)' "$H/search?q=engagement")
+t "search hits (HTML)"   1   "$(printf '%s' "$hits" | grep -c -m1 '<mark class="sl-mark">')"
+# The markdown check must prove the markdown surface answered: HTML cards also
+# link /agreement/{id}, so assert the content type as well as the body.
+md=$(curl -s -m 30 -w '\n%{content_type}' -H 'accept: text/markdown' "$H/search?q=engagement")
+t "search hits (markdown)" "text/markdown; charset=utf-8 1" "${md##*$'\n'} $(printf '%s' "${md%$'\n'*}" | grep -c -m1 -i 'agreement/')"
+# AC 3.3: pagination is consistent — both pages 200, totals equal, first results differ.
+p1=$(curl -s -m 30 -A 'Mozilla/5.0 (smoke)' -w '\n%{http_code}' "$H/search?q=agreement&page=1")
+p2=$(curl -s -m 30 -A 'Mozilla/5.0 (smoke)' -w '\n%{http_code}' "$H/search?q=agreement&page=2")
+tot(){ printf '%s' "${1%$'\n'*}" | grep -o -m1 '<strong>[0-9,]*</strong> result'; }
+firstid(){ printf '%s' "${1%$'\n'*}" | grep -o -m1 'data-id="[0-9]*"'; }
+t "pagination status (AC 3.3)" "200 200" "${p1##*$'\n'} ${p2##*$'\n'}"
+t "pagination totals (AC 3.3)" "$(tot "$p1")" "$(tot "$p2")"
+if [ -n "$(firstid "$p1")" ] && [ "$(firstid "$p1")" != "$(firstid "$p2")" ]; then echo "ok   pagination first result differs (AC 3.3)"; else echo "FAIL pagination first result (AC 3.3): '$(firstid "$p1")' vs '$(firstid "$p2")'"; fail=1; fi
+t "search_agreements" "false true" "$(rpc '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search_agreements","arguments":{"query":"engagement","limit":2}}}' \
+  | jq -r '[(.result.isError // false), ((.result.content[0].text | fromjson? | .total // 0) > 0)] | map(tostring) | join(" ")')"
 t "MCP server card"      200 "$(curl -s -o /dev/null -w '%{http_code}' -m 20 "$H/.well-known/mcp/server-card.json")"
 t "markdown negotiation" "text/markdown; charset=utf-8" \
   "$(curl -s -o /dev/null -w '%{content_type}' -m 30 -H 'accept: text/markdown' "$H/")"
@@ -22,7 +39,8 @@ t "tools/list" "browse_agreements,get_agreement,list_recent_agreements,search_ag
   "$(rpc '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | jq -r '[.result.tools[].name]|sort|join(",")')"
 filed=$(rpc '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_recent_agreements","arguments":{"limit":1}}}' \
         | jq -r '.result.content[0].text | fromjson | .items[0].filed_at' | cut -c1-8)
-age=$(( ( $(date -u +%s) - $(date -u -d "${filed:-19700101}" +%s) ) / 86400 ))
+D=date; command -v gdate >/dev/null && D=gdate
+age=$(( ( $($D -u +%s) - $($D -u -d "${filed:-19700101}" +%s) ) / 86400 ))
 if [ "$age" -le 4 ]; then echo "ok   freshness ($filed)"; else echo "FAIL freshness: newest filing $filed is $age days old"; fail=1; fi
 t "ingest rejects no key" 401 "$(curl -s -o /dev/null -w '%{http_code}' -m 20 -X POST "$H/api/ingest" -H 'content-type: application/json' -d '{"rows":[]}')"
 exit $fail
