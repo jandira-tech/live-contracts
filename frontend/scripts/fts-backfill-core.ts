@@ -127,6 +127,9 @@ export function parseArgs(argv: string[]): Opts {
     throw usage('--remote needs --to <max rowid> taken after the producer stopped');
   if (o.to !== undefined && o.from! > o.to) throw usage('--from must not exceed --to');
   if (!o.db) throw usage('--db needs a name');
+  // An explicitly passed empty/non-HTTP origin would be falsy and silently skip
+  // every health probe while the run still returns DONE; reject it up front.
+  if (origin !== undefined && !/^https?:\/\/\S+$/i.test(origin)) throw usage('--origin must be an http(s) URL');
   return { ...(o as Opts), to: o.to, mode, origin: mode === 'remote' ? (origin ?? DEFAULT_ORIGIN) : undefined };
 }
 
@@ -241,8 +244,9 @@ async function backfill(
     const msg = (e as Error).message;
     // Only a rejection of the index is INTEGRITY. A CPU limit or a lost response
     // says nothing about the index, and delete-all would wipe a healthy one.
-    // SQLite's own SQLITE_CORRUPT text in D1's structured error (#88, #89).
-    if (e instanceof D1Error && /database disk image is malformed/i.test(msg)) {
+    // SQLite's own corruption text in D1's structured error, including the
+    // SQLITE_CORRUPT_VTAB code FTS5's integrity-check reports (#88, #89).
+    if (e instanceof D1Error && /database disk image is malformed|SQLITE_CORRUPT/i.test(msg)) {
       log(`INTEGRITY: integrity-check failed: ${msg}. Run ${RESET} and restart from 0.`);
       return { code: EXIT.INTEGRITY, lastHi };
     }

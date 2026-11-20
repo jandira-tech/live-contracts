@@ -66,12 +66,23 @@ describe('parseArgs (AC 2.2)', () => {
     [['--remote', '--to', '9', '--db']],
     [['--remote', '--to', '9', '--persist-to']],
     [['--local', '--persist-to']],
+    [['--remote', '--to', '9', '--origin', '']],
+    [['--remote', '--to', '9', '--origin', 'ftp://example.com']],
   ])('rejects %j', (argv) => {
     expect(() => parseArgs(argv)).toThrow(/usage/i);
   });
   it('rejects a value-taking flag at the end of the arguments instead of ignoring it', () => {
     expect(() => parseArgs(['--remote', '--to', '9', '--origin'])).toThrow(/--origin requires a value/);
     expect(() => parseArgs(['--local', '--persist-to'])).toThrow(/--persist-to requires a value/);
+  });
+  it('rejects an empty or non-HTTP --origin instead of silently skipping the health probe', () => {
+    expect(() => parseArgs(['--remote', '--to', '9', '--origin', ''])).toThrow(/--origin must be an http/);
+    expect(() => parseArgs(['--remote', '--to', '9', '--origin', 'ftp://example.com'])).toThrow(/--origin must be an http/);
+  });
+  it('accepts an explicit http(s) --origin', () => {
+    expect(parseArgs(['--remote', '--to', '9', '--origin', 'https://example.com'])).toMatchObject({
+      origin: 'https://example.com',
+    });
   });
 });
 
@@ -84,7 +95,14 @@ const ids = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
  * `size: null` models wrangler omitting `meta.size_after`.
  */
 function fakeD1(
-  state: { rows: number[]; index: number[]; size?: number | null; corrupt?: boolean; integrityError?: string },
+  state: {
+    rows: number[];
+    index: number[];
+    size?: number | null;
+    corrupt?: boolean;
+    corruptVtab?: boolean;
+    integrityError?: string;
+  },
   hooks: { onChunk?: (i: number) => void; failChunk?: number; onRead?: (sql: string) => void } = {},
 ) {
   const writes: string[] = [];
@@ -106,6 +124,7 @@ function fakeD1(
       integrityChecks++;
       if (state.integrityError) throw new Error(state.integrityError);
       if (state.corrupt) throw new D1Error('D1_ERROR: database disk image is malformed');
+      if (state.corruptVtab) throw new D1Error('D1_ERROR: SQLITE_CORRUPT_VTAB');
       return r([]);
     }
     const chunk = sql.match(
@@ -292,6 +311,14 @@ describe('runBackfill', () => {
     const { d, lines } = deps(f.exec);
     expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.INTEGRITY, lastHi: 7 });
     expect(lines.join('\n')).toMatch(/INTEGRITY.*malformed[\s\S]*delete-all/);
+    expect(lines.join('\n')).not.toMatch(/DONE/);
+  });
+
+  it("maps FTS5's SQLITE_CORRUPT_VTAB integrity failure (D1 structured error) to INTEGRITY", async () => {
+    const f = fakeD1({ rows: ids(7), index: [], corruptVtab: true });
+    const { d, lines } = deps(f.exec);
+    expect(await runBackfill(d, { ...BASE, to: 7 })).toEqual({ code: EXIT.INTEGRITY, lastHi: 7 });
+    expect(lines.join('\n')).toMatch(/INTEGRITY[\s\S]*delete-all/);
     expect(lines.join('\n')).not.toMatch(/DONE/);
   });
 
