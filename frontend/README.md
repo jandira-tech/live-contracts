@@ -24,9 +24,12 @@ The live loaders in `src/loaders/` call those functions, which default to `getDb
 - **Detail** (`/agreement/[id]`) — markdown → HTML with relative image refs resolved against the EDGAR
   filing folder (image-only exhibits); captured exhibit images; sticky filing aside with Export to
   Cicero, the SEC filing and a Markdown view.
-- **Search** (`/search?q=`) — FTS5 full-text search (`exhibits_fts`, migration 0003) with hit snippets;
-  every token is quoted so FTS operators in user input are literal. The old `LIKE '%q%'` scan over
-  19k markdown bodies is kept only as a fallback for a database without the index.
+- **Search** (`/search?q=`, `Accept: text/markdown`, MCP `search_agreements`) — external-content FTS5
+  index (`exhibits_fts`, migration 0003) keyed on `exhibits.rowid`, so markdown is not stored twice.
+  Every token is quoted so FTS operators in user input are literal. Snippets are computed only for
+  the current page. There is no `LIKE` fallback: a missing index is an error, never a scan of 1.8 GB.
+  Measured 2026-11-07: 19,554 documents, uncached searches under 0.6 s including `a` and `agreement`,
+  database 2.29 GB with the index.
 - **Ingest** — `POST /api/ingest` (key-gated): the backend UPSERTs finalized rows into D1.
 
 ## Design system
@@ -78,7 +81,7 @@ bun run test:fonts       # font-loading guard (no server needed)
 bun run test:design      # design-system conformance guard (no server needed)
 bun run test:smoke       # BASE=<url> node test/smoke.mjs
 bun run db:migrate       # wrangler d1 migrations apply sec-ex10 --remote (run BEFORE deploying 0003)
-bun run db:fts-backfill -- --remote   # one-off, resumable: index rows that predate the FTS triggers
+pnpm db:fts-backfill -- --remote --to <max rowid>   # index rows that predate the FTS triggers (see contracts_fix.md §5)
 wrangler deploy          # deploy code changes (content needs no redeploy)
 ```
 

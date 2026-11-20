@@ -1,0 +1,30 @@
+name: frontend
+
+on:
+  push:
+    paths: ['frontend/**', '.github/workflows/frontend.yml']
+  pull_request:
+    paths: ['frontend/**', '.github/workflows/frontend.yml']
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Design-system and font guards (no server needed)
+        run: |
+          bun run test:fonts
+          bun run test:design
+      - name: Type check
+        run: bun run check
+      - name: Unit tests (Workers pool, local D1)
+        run: bun run test:unit
+      - name: Build
+        run: bun run build
