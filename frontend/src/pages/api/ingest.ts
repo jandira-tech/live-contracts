@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { sql } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { exhibits, type ExhibitInsert } from '../../db/schema';
-import { compileRedactions, redactPersonalData, type RedactionRules } from '../../lib/redactions';
+import { compileRedactions, redactJsonText, redactPersonalData, type RedactionRules } from '../../lib/redactions';
 
 export const prerender = false;
 
@@ -45,7 +45,7 @@ const toInsert = (r: InRow, rules: RedactionRules): ExhibitInsert => ({
   docType: r.doc_type ?? null, filename: r.filename, description: redactPersonalData(r.description, rules) ?? null,
   sequence: r.sequence ?? null, filingUrl: r.filing_url ?? null, foundAt: r.found_at ?? null,
   filedAt: r.filed_at ?? null, markdownStatus: r.markdown_status ?? null,
-  filingMetadata: r.filing_metadata ?? null, imageUrls: r.image_urls ?? null,
+  filingMetadata: redactJsonText(r.filing_metadata, rules) ?? null, imageUrls: r.image_urls ?? null,
   markdown: redactPersonalData(r.markdown, rules) ?? null, // see lib/redactions.ts (GDPR requests)
   // Normalize blank/whitespace strings to null so they don't bypass the enrich-only
   // coalesce and clobber a stored value with an empty string.

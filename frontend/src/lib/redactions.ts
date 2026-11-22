@@ -9,6 +9,9 @@
 // accession, so a later filing of the same contract is covered too.
 //
 //   wrangler secret put PII_REDACTIONS   # e.g. ["Examplestraße\\s*12(?!\\d)", "12345\\s*Exampletown"]
+//
+// A missing or blank secret is a misconfiguration, not "no rules": set it to `[]`
+// to run with none.
 
 export const REPLACEMENT = '[address redacted]';
 
@@ -16,8 +19,8 @@ export type RedactionRules = readonly RegExp[];
 
 /** Parse the secret. Throws on anything malformed: the caller must fail closed. */
 export function compileRedactions(secret: string | undefined | null): RedactionRules {
-  if (!secret || !secret.trim()) return [];
   try {
+    if (!secret || !secret.trim()) throw new TypeError('unset or blank (use [] for no rules)');
     const sources: unknown = JSON.parse(secret);
     if (!Array.isArray(sources) || !sources.every((s) => typeof s === 'string' && s.length > 0)) {
       throw new TypeError('not an array of non-empty strings');
@@ -34,4 +37,29 @@ export function redactPersonalData<T extends string | null | undefined>(text: T,
   let out: string = text;
   for (const rule of rules) out = out.replace(rule, REPLACEMENT);
   return out as T;
+}
+
+/**
+ * Redact every string inside a JSON document (keys and values), so an address that
+ * the source escaped (`\u00df`) is still caught. Text that is not JSON is redacted as is.
+ */
+export function redactJsonText<T extends string | null | undefined>(text: T, rules: RedactionRules): T {
+  if (!text || rules.length === 0) return text;
+  let doc: unknown;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return redactPersonalData(text, rules);
+  }
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') return redactPersonalData(v, rules);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [redactPersonalData(k, rules), walk(x)]));
+    }
+    return v;
+  };
+  const before = JSON.stringify(doc);
+  const after = JSON.stringify(walk(doc));
+  return (after === before ? text : after) as T; // untouched documents keep their exact bytes
 }
