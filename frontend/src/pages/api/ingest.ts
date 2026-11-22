@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { sql } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import { exhibits, type ExhibitInsert } from '../../db/schema';
+import { compileRedactions, redactJsonText, redactPersonalData, type RedactionRules } from '../../lib/redactions';
 
 export const prerender = false;
 
@@ -39,12 +40,13 @@ function uuidv7(): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-const toInsert = (r: InRow): ExhibitInsert => ({
+const toInsert = (r: InRow, rules: RedactionRules): ExhibitInsert => ({
   id: uuidv7(), accession: r.accession, cik: r.cik ?? null, formType: r.form_type ?? null,
-  docType: r.doc_type ?? null, filename: r.filename, description: r.description ?? null,
+  docType: r.doc_type ?? null, filename: r.filename, description: redactPersonalData(r.description, rules) ?? null,
   sequence: r.sequence ?? null, filingUrl: r.filing_url ?? null, foundAt: r.found_at ?? null,
   filedAt: r.filed_at ?? null, markdownStatus: r.markdown_status ?? null,
-  filingMetadata: r.filing_metadata ?? null, imageUrls: r.image_urls ?? null, markdown: r.markdown ?? null,
+  filingMetadata: redactJsonText(r.filing_metadata, rules) ?? null, imageUrls: r.image_urls ?? null,
+  markdown: redactPersonalData(r.markdown, rules) ?? null, // see lib/redactions.ts (GDPR requests)
   // Normalize blank/whitespace strings to null so they don't bypass the enrich-only
   // coalesce and clobber a stored value with an empty string.
   source: (r.source && r.source.trim()) || null, sizeBytes: r.size_bytes ?? null,
@@ -104,6 +106,12 @@ export async function POST(context: APIContext): Promise<Response> {
   if (rows.length === 0) return j({ accepted: [] }, 200);
   if (rows.length > 200) return j({ error: 'max 200 rows per batch' }, 400);
 
+  // Fail closed: a broken redaction list must not let personal data through.
+  let rules: RedactionRules;
+  try { rules = compileRedactions(e.PII_REDACTIONS); } catch {
+    return j({ error: 'server misconfigured: PII_REDACTIONS unreadable' }, 500);
+  }
+
   const db = drizzle(e.DB, { schema });
   // D1 caps bound parameters at 100/query → ≤5 rows/insert (18 cols * 5 = 90).
   // Run the chunks in one atomic db.batch (fewer round-trips, no partial write).
@@ -114,7 +122,7 @@ export async function POST(context: APIContext): Promise<Response> {
   for (let i = 0; i < rows.length; i += 5) {
     const chunk = rows.slice(i, i + 5);
     stmts.push(
-      db.insert(exhibits).values(chunk.map(toInsert))
+      db.insert(exhibits).values(chunk.map((r) => toInsert(r, rules)))
         .onConflictDoUpdate({ target: [exhibits.accession, exhibits.docType, exhibits.filename], set: CONFLICT_SET }),
     );
     for (const r of chunk) accepted.push(r.id);
