@@ -57,3 +57,6 @@ secinfra-rust
 dist/
 _to_delete/
 plugins/
+
+# Scratch work (probes, logs, staged inputs)
+.scratch/
